@@ -1,5 +1,8 @@
 $Id: Changes,v 1.5 2003/06/17 18:16:18 pmh Exp $
 
+2003-06-17 0.07
+  Fix test which got broken at the last minute before 0.06's release
+
 2003-06-17 0.06
   Deal with utf8 properly (and add t/04utf8.t)
     This changes the file format, so added format version number to file header

@@ -1,5 +1,5 @@
 # Test of behaviour wrt corrupt cache files
-# $Id: 03corrupt.t,v 1.4 2003/06/17 18:39:30 pmh Exp $
+# $Id: 03corrupt.t,v 1.5 2003/06/17 18:50:32 pmh Exp $
 
 # This test is aware of some of the structure of the cache files
 # Be careful when changing things
@@ -75,7 +75,7 @@ my $head=pack "l$headsize",12345;
 ok(print(FH $head),'writing broken header');
 ok(close FH,'closing boken file');
 eval{ $cache=Cache::Mmap->new($fname); };
-ok($@=~/not a valid Cache::Mmap file/,"magic number check");
+ok($@=~/not a Cache::Mmap file/,"magic number check");
 
 # Try accessing a file with a different file format
 undef $cache;

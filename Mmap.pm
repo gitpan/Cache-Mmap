@@ -30,7 +30,7 @@ use vars qw(
   $VERSION @ISA
 );
 
-$VERSION='0.06';
+$VERSION='0.07';
 @ISA=qw(DynaLoader);
 
 __PACKAGE__->bootstrap($VERSION);

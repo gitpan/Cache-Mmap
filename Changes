@@ -1,3 +1,13 @@
+$Revision: 1.2 $
+
+2001-12-31 0.04
+  Fixed another serious bug in write(), which was introduced in the previous fix
+  Move file locking into XS, so we don't need to know struct flock's layout
+  Remove dependency on Mmap.pm by doing that in XS, too
+    This means that it will compile on 5.6.0 without too many hassles
+  Added a test suite (well, one files so far)
+    This is how the new write() bug was caught. Yay, tests!
+
 2001-12-28 0.03
   Fixed serious bug in write(), which corrupted the cache file when replacing
     an already existing entry

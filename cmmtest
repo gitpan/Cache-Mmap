@@ -1,6 +1,7 @@
 #!/opt/bin/perl
 
-# ctest: test of mmapped cache
+# cmmtest: test of mmapped cache
+# $Revision: 1.2 $
 
 use Cache::Mmap;
 use Data::Dumper;

@@ -2,6 +2,10 @@ Changes
 MANIFEST
 Makefile.PL
 Mmap.pm
+Mmap.xs
 README
 Todo
 cmmtest
+ppport.h
+t/01simple.t
+typemap

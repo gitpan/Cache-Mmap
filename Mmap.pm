@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   sccs version: 1.10    last changed: 12/28/01
+#   $Revision: 1.2 $
 #
 #   Copyright Institute of Physics Publishing 2001
 #   You may distribute under the terms of the GPL or the Artistic License,
@@ -18,19 +18,22 @@
 ################################################################################
 
 package Cache::Mmap;
-use Mmap;
+use DynaLoader();
 use Storable qw(freeze thaw);
-use Fcntl qw(:DEFAULT :flock);
+use Fcntl;
 use Symbol();
 use IO::Seekable qw(SEEK_SET SEEK_END);
 use Carp qw(croak);
 use integer;
 use strict;
 use vars qw(
-  $VERSION
+  $VERSION @ISA
 );
 
-$VERSION='0.03';
+$VERSION='0.04';
+@ISA=qw(DynaLoader);
+
+__PACKAGE__->bootstrap($VERSION);
 
 # Default cache options
 my %def_options=(
@@ -90,7 +93,7 @@ sub new{
   }
   $self->{pagesize}>=$maxheadsize
     or croak "'pagesize' options for $class must be at least $maxheadsize";
-  foreach(qw(read write)){
+  foreach(qw(read write delete)){
     !$self->{$_} || ref $self->{$_} eq 'CODE'
       or croak "'$_' option for $class must be a CODE ref or empty";
   }
@@ -186,7 +189,7 @@ sub _set_options{
 	or croak "Can't write file header: $!";
     }
 
-    mmap($self->{_mmap}='',$size,PROT_READ|PROT_WRITE,MAP_SHARED,$self->{_fh})
+    mmap($self->{_mmap}='',$size,$self->{_fh})
       or do{
 	delete $self->{_mmap};
 	croak "Can't mmap $self->{_filename}: $!";
@@ -335,10 +338,7 @@ sub _lock{
   my($self,$offset)=@_;
   my $length=$offset ? $self->{bucketsize} : $headsize;
 
-  # XXX This needs XS to get the packing right for all platforms
-  my $flock=pack('ssll',F_WRLCK,SEEK_SET,$offset,$length);
-
-  fcntl($self->{_fh},F_SETLKW,$flock);
+  _lock_xs($self->{_fh},$offset,$length,1);
 }
 
 ################################################################################
@@ -349,10 +349,7 @@ sub _lock{
 sub _unlock{
   my($self)=@_;
 
-  # XXX This needs XS to get the packing right for all platforms
-  my $flock=pack('ssll',F_UNLCK,SEEK_SET,0,0);
-
-  fcntl($self->{_fh},F_SETLKW,$flock);
+  _lock_xs($self->{_fh},0,0,0);
 }
 
 ################################################################################
@@ -451,7 +448,7 @@ sub write{
 	my $pre=substr $self->{_mmap},
 	    $bucket+$bheadsize,$off-($bucket+$bheadsize);
 	my $post=substr $self->{_mmap},
-	    $off+$_size,$bucket+$bheadsize+$filled-$off-$size;
+	    $off+$_size,$bucket+$bheadsize+$filled-$off-$_size;
         my $new_filled=length($pre.$post);
 	my $bhead=substr(pack("lx$bheadsize",$new_filled),0,$bheadsize);
 

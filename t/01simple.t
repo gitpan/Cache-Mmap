@@ -1,8 +1,9 @@
 # Simple test of cache with default parameters
-# $Revision: 1.1 $
+# $Id: 01simple.t,v 1.2 2003/06/13 16:22:22 pmh Exp $
 
 use Test::More tests => 46;
 BEGIN{ use_ok('Cache::Mmap'); }
+use strict;
 
 # Prepare the ground
 chdir 't' if -d 't';

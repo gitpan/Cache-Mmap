@@ -4,11 +4,13 @@ underlying data, access to the cache is completely transparent, and the module
 handles all the details of refreshing cache contents, and updating underlying
 data, if necessary.
 
-Changes since version 0.04
-  Added the entries() method, so you can see what's in the cache
-  Removed unnecessary CDROM exception on license
-  Removed a couple of warnings
-
+Changes since version 0.05
+  Add a check for super-sized entries (those which extend past the bucket end)
+  Make zero-sized check message include cache filename and key
+  Add t/03corrupt.t to check that the corruption checks are working
+  Deal with utf8 properly (and add t/04utf8.t)
+    This changes the file format, so added format version number to file header
+  Existing files which aren't cache files are not overwritten
 
 
 INSTALLING
@@ -21,7 +23,7 @@ How to install
 	make install
 
 
-$Revision: 1.3 $
+$Id: README,v 1.5 2003/06/17 18:16:18 pmh Exp $
 
 Copyright Institute of Physics Publishing 2002
 You may distribute under the terms of the GPL or the Artistic License,

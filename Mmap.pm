@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Revision: 1.3 $
+#   $Id: Mmap.pm,v 1.9 2003/06/17 18:39:14 pmh Exp $
 #
 #   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,
@@ -16,6 +16,8 @@
 ################################################################################
 
 package Cache::Mmap;
+
+use constant has_utf8 => $^V ge "\5\6\0";
 use DynaLoader();
 use Storable qw(freeze thaw);
 use Fcntl;
@@ -28,7 +30,7 @@ use vars qw(
   $VERSION @ISA
 );
 
-$VERSION='0.05';
+$VERSION='0.06';
 @ISA=qw(DynaLoader);
 
 __PACKAGE__->bootstrap($VERSION);
@@ -63,10 +65,12 @@ my %bool_opts=(
 # Bit positions for element flags
 use constant elem_dirty => 0x0001;
 
-# Magic number to validate existing cache files
-my $magic=0x15ACACE;
+use constant magic => 0x15ACACE;# Cache file magic number
+use constant filevers => 1;	# File format version number supported
 
-my $headsize=4*10;  # File: magic, buckets, bucketsize, pagesize, flags
+
+my $headsize=4*10;  # File: magic, buckets, bucketsize, pagesize, flags,
+		    #       file format version
 my $bheadsize=4*10; # Bucket: filled
 my $eheadsize=4*10; # Element: size, time, klen, vlen, flags
 my $maxheadsize=$headsize > $bheadsize ? $headsize : $bheadsize;
@@ -145,16 +149,19 @@ sub _set_options{
       if((my $bytes=sysread($self->{_fh},$head,$headsize))!=$headsize){
 	croak "Expecting $headsize bytes, read $bytes from cache header\n";
       }
-      my($mg,$buckets,$bucketsize,$pagesize,$flags)=unpack('l5',$head);
-      if($mg==$magic){
-	$self->{buckets}=$buckets;
-	$self->{bucketsize}=$bucketsize;
-	$self->{pagesize}=$pagesize;
-	while(my($opt,$bit)=each %bool_opts){
-	  $self->{$opt}=!!($flags&$bit);
-	}
-	$magic_ok=1;
+      my($mg,$buckets,$bucketsize,$pagesize,$flags,$format)=unpack('l6',$head);
+      $mg==magic
+        or croak "$self->{_filename} is not a Cache::Mmap file";
+      ($format+=0)==filevers
+        or croak "$self->{_filename} uses v$format data structures. Cache::Mmap $VERSION only supports v".filevers." data structures";
+
+      $self->{buckets}=$buckets;
+      $self->{bucketsize}=$bucketsize;
+      $self->{pagesize}=$pagesize;
+      while(my($opt,$bit)=each %bool_opts){
+	$self->{$opt}=!!($flags&$bit);
       }
+      $magic_ok=1;
     }
 
     # Make sure the file is big enough for the whole cache
@@ -178,8 +185,8 @@ sub _set_options{
       while(my($opt,$bit)=each %bool_opts){
 	$flags|=$bit if $self->{$opt};
       }
-      my $head=pack("l5x$headsize",
-	$magic,@$self{'buckets','bucketsize','pagesize'},$flags,
+      my $head=pack("l6x$headsize",
+	magic,@$self{'buckets','bucketsize','pagesize'},$flags,filevers
       );
       sysseek $self->{_fh},SEEK_SET,0
 	or croak "Can't seek to beginning: $!";
@@ -364,7 +371,7 @@ sub entries{
   my $buckets=$self->buckets;
   my $bucketsize=$self->bucketsize;
   my $pagesize=$self->pagesize;
-  my $expiry=$self->{expiry};
+  my $expiry=$self->expiry;
 
   my @entries;
   for(0..$buckets-1){
@@ -386,11 +393,11 @@ sub entries{
 	  my $part=substr($self->{_mmap},$off,$end-$off);
 	  $part=~s/\\/\\\\/g;
 	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-	  die "Zero-sized entry at offset $off! Remaining bucket contents: $part";
+	  die "Zero-sized entry in $self->{_filename}, offset $off! Remaining bucket contents: $part";
 	}
 	next if $expiry && time()-$time > $expiry;
 
-	my $key=substr $self->{_mmap},$off+$eheadsize,$klen;
+	my $key=$self->_decode(substr($self->{_mmap},$off+$eheadsize,$klen),1);
         if($details){
 	  push @entries,{
 	    key => $key,
@@ -398,7 +405,7 @@ sub entries{
 	    dirty => $flags & elem_dirty,
 	    $details>1 ? (
 	      value => $self->_decode(
-		substr $self->{_mmap},$off+$eheadsize+$klen,$vlen
+		substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0
 	      ),
 	    ) : (),
 	  };
@@ -427,6 +434,7 @@ sub entries{
 sub read{
   my($self,$key)=@_;
   my $bucket=$self->_bucket($key);
+  my $ekey=$self->_encode($key,1);
 
   # Lock the bucket. This is a write lock, even for reading, since we may
   # move items within the bucket
@@ -443,9 +451,9 @@ sub read{
       # XXX What about dirty expired items???
       if($expired && !($flags & elem_dirty)){
 	# No need to write underlying data, because it's not dirty
-	my $bend=$bucket+$self->{bucketsize};
-	substr($self->{_mmap},$off,$bend-$off)
-	  =substr($self->{_mmap},$off+$size,$bend-$off-$size).("\0" x $size);
+	my $b_end=$bucket+$self->{bucketsize};
+	substr($self->{_mmap},$off,$b_end-$off)
+	  =substr($self->{_mmap},$off+$size,$b_end-$off-$size).("\0" x $size);
 	my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
 	$filled-=$size;
 	substr($self->{_mmap},$bucket,$bheadsize)
@@ -461,7 +469,7 @@ sub read{
 	  .substr($self->{_mmap},$poff,$psize);
 	$off=$poff;
       }
-      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen));
+      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
     }}
     if(!$found){
       my @_read=$self->{read}
@@ -470,9 +478,9 @@ sub read{
 
       # Store value in cache
       if($found || $self->{cachenegative}){
-	my $eval=$self->_encode($val);
+	my $eval=$self->_encode($val,0);
 
-	$self->_insert($bucket,$key,$eval,0);
+	$self->_insert($bucket,$ekey,$eval,0);
       }
     }
 
@@ -493,8 +501,9 @@ sub read{
 # Author: Peter Haworth
 sub write{
   my($self,$key,$val)=@_;
-  my $klen=length $key;
-  my $eval=$self->_encode($val);
+  my $ekey=$self->_encode($key,1);
+  my $klen=length $ekey;
+  my $eval=$self->_encode($val,0);
   my $vlen=length $eval;
   my $size=$eheadsize+$klen+$vlen;
   my $bsize=$self->{bucketsize}-$bheadsize;
@@ -524,7 +533,7 @@ sub write{
       }
 
       # Generate new bucket contents
-      $self->_insert($bucket,$key,$eval,1);
+      $self->_insert($bucket,$ekey,$eval,1);
 
       # Write to underlying data
       if($self->{writethrough} and my $write=$self->{write}){
@@ -549,13 +558,13 @@ sub write{
 }
 
 ################################################################################
-# Internal Method: _insert($bucket,$key,$eval,$write)
+# Internal Method: _insert($bucket,$ekey,$eval,$write)
 # Description: Insert the key/value pair into the bucket
 #	$write is true if this is a cache write
 # Author: Peter Haworth
 sub _insert{
-  my($self,$bucket,$key,$eval,$write)=@_;
-  my $klen=length $key;
+  my($self,$bucket,$ekey,$eval,$write)=@_;
+  my $klen=length $ekey;
   my $vlen=length $eval;
   my $size=$eheadsize+$klen+$vlen;
   my $bsize=$self->{bucketsize}-$bheadsize;
@@ -565,11 +574,12 @@ sub _insert{
     $size,time(),$klen,$vlen,($write && !$self->{writethrough} && elem_dirty),
   ),0,$eheadsize);
   my($filled)=unpack 'l',substr($self->{_mmap},$bucket,4);
-  my $content=$ehead.$key.$eval
+  my $content=$ehead.$ekey.$eval
     .substr($self->{_mmap},$bucket+$bheadsize,$filled);
+  $filled=length $content;
 
   # Trim down to fit into bucket
-  if(($filled=length $content) > $bsize){
+  if($filled > $bsize){
     # Find all items which fit in the bucket
     my $poff=my $off=$size;
     while($off<=$bsize){
@@ -589,13 +599,13 @@ sub _insert{
 	  my $off=$bucket+$off;
 	  $part=~s/\\/\\\\/g;
 	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-	  die "Zero-size entry at $off! Remaining bucket contents: $part";
+	  die "Zero-size entry in $self->{_filename}, offset $off! [ekey=$ekey] Remaining bucket contents: $part";
 	  return;
 	}
 	if($flags & elem_dirty){
-	  my $key=substr($content,$off+$eheadsize,$klen);
+	  my $key=$self->_decode(substr($content,$off+$eheadsize,$klen),1);
 	  my $val=$self->_decode(
-	    substr($content,$off+$eheadsize+$klen,$vlen));
+	    substr($content,$off+$eheadsize+$klen,$vlen),0);
 	  $wsub->($key,$val,$self->{content});
 	}
 	$off+=$size;
@@ -632,17 +642,19 @@ sub delete{
       =$self->_find($bucket,$key);
     
     if($found){
-      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen));
+      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
       if(my $dsub=$self->{delete} and !($flags & elem_dirty)){
 	$dsub->($key,$val,$self->{context});
       }
       my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
       my $new_filled=$filled-$size;
-      my $boff=$off-($bucket+$bheadsize);
       substr($self->{_mmap},$bucket,$bheadsize)
 	=substr(pack("lx$bheadsize",$new_filled),0,$bheadsize);
-      substr($self->{_mmap},$off,$filled-$boff-$size)
-	=substr($self->{_mmap},$off+$size,$filled-$boff-$size);
+
+      my $fill_end=$bucket+$bheadsize+$filled;
+      my $elem_end=$off+$size;
+      substr($self->{_mmap},$off,$fill_end-$elem_end)
+        =substr($self->{_mmap},$elem_end,$fill_end-$elem_end);
     }
 
     1;
@@ -678,22 +690,30 @@ sub _bucket{
 # Returns: ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags)
 sub _find{
   my($self,$bucket,$key)=@_;
-  my $_klen=length $key;
+#  my $_klen=length $key;
   my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
   my $off=$bucket+$bheadsize;
   my $end=$off+$filled;
+  my $b_end=$bucket+$self->bucketsize;
 
   my($found,$size,$time,$klen,$vlen,$flags,$poff);
   while($off<$end){
+    if($off>=$b_end){
+      die "Super-sized entry in $self->{_filename}, offset $poff! [size=$size, finding key=$key]";
+    }
     ($size,$time,$klen,$vlen,$flags)
       =unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
     if(!$size){
       my $part=substr($self->{_mmap},$off,$end-$off);
       $part=~s/\\/\\\\/g;
       $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-      die "Zero-sized entry at offset $off! Remaining bucket contents: $part";
+      my $prev;
+      if($poff){
+	$prev=" [poff=$poff]";
+      }
+      die "Zero-sized entry in $self->{_filename}, offset $off! [bucket=$bucket][key=$key]$prev Remaining bucket contents: $part";
     }
-    if($klen==$_klen && substr($self->{_mmap},$off+$eheadsize,$klen) eq $key){
+    if($self->_decode(substr($self->{_mmap},$off+$eheadsize,$klen),1) eq $key){
       $found=1;
       last;
     }
@@ -704,7 +724,7 @@ sub _find{
   return unless $found;
 
   my $expired;
-  if(my $exp=$self->{expiry}){
+  if(my $exp=$self->expiry){
     $expired=time-$time>$exp;
   }
 
@@ -712,33 +732,50 @@ sub _find{
 }
     
 ################################################################################
-# Internal method: _encode($value)
+# Internal method: _encode($value,$is_key)
 # Description: Encodes the given value into a string
 # Author: Peter Haworth
 sub _encode{
-  my($self,$value)=@_;
+  my($self,$value,$is_key)=@_;
 
   if(!defined $value){
     return '';
-  }elsif($self->{strings}){
-    return " $value";
+  }elsif($self->{strings} || $is_key){
+    if(has_utf8){
+      my $eval=pack 'a*',$value;
+      if($eval eq $value){
+        return " $eval";
+      }else{
+        return "U$eval";
+      }
+    }else{
+      return " $value";
+    }
   }else{
     return ' '.freeze($value);
   }
 }
 
 ################################################################################
-# Internal method: _decode($value)
+# Internal method: _decode($value,$is_key)
 # Description: Decodes the given string value
 # Author: Peter Haworth
 sub _decode{
-  my($self,$value)=@_;
+  my($self,$value,$is_key)=@_;
 
   if($value eq ''){
     return undef;
   }else{
-    substr($value,0,1)='';
-    if($self->{strings}){
+    $value=~s/^(.)//s;
+    my $code=$1;
+    if($code eq 'U'){
+      if(has_utf8){
+        utf8::decode($value);
+	return $value;
+      }else{
+        croak "UTF8 encoded value in $self->{_filename} detected\n";
+      }
+    }elsif($self->{strings} || $is_key){
       return $value;
     }else{
       return thaw($value);
@@ -789,7 +826,7 @@ prevented by file locking of the relevent section of the cache file.
 =item Cache::Mmap->new($filename,\%options)
 
 Creates a new cache object. If the file named by C<$filename> does not already
-exist, it will be created. Various options may be set in C<%options>, which
+exist, it will be created.  Various options may be set in C<%options>, which
 affect the behaviour of the cache (defaults in parentheses):
 
 =over 8

@@ -1,7 +1,7 @@
 #!/opt/bin/perl
 
 # cmmtest: test of mmapped cache
-# $Revision: 1.3 $
+# $Id: cmmtest,v 1.4 2003/06/12 15:47:42 pmh Exp $
 
 use Cache::Mmap;
 use Data::Dumper;
@@ -25,7 +25,7 @@ print "Strings: ",$cache->strings,"\n";
 $|=1;
 print "cmmtest: ";
 while(<>){
-  my($cmd,$key,$value)=/^([<>0?-k])(?:\s+(\S+)(?:\s+(.*))?)?\s+$/
+  my($cmd,$key,$value)=/^([<>0?\-k])(?:\s+(\S+)(?:\s+(.*))?)?\s+$/
     or do{ warn "Invalid command\n"; next; };
   
   if($cmd eq '<'){

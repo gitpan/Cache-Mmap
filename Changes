@@ -1,4 +1,14 @@
-$Revision: 1.3 $
+$Id: Changes,v 1.5 2003/06/17 18:16:18 pmh Exp $
+
+2003-06-17 0.06
+  Deal with utf8 properly (and add t/04utf8.t)
+    This changes the file format, so added format version number to file header
+  Existing files which aren't cache files are not overwritten
+
+2003-06-13 0.05_1
+  Add a check for super-sized entries (those which extend past the bucket end)
+  Make zero-sized check message include cache filename and key
+  Add t/03corrupt.t to check that the corruption checks are working
 
 2002-08-28 0.05
   Add the entries() method, suggested by Marc Kelly <marc@vendusia.com>

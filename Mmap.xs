@@ -106,3 +106,24 @@ _lock_xs(fh,off,len,mode)
         if(fcntl(fd,F_SETLKW,&fl)>=0)
 	  ST(0)=&PL_sv_yes;
 
+  /* Define our own utf8::decode(), if we're on perl 5.6 */
+
+#if (PERL_VERSION == 6)
+
+MODULE = Cache::Mmap		PACKAGE = utf8
+
+void
+decode(SV *str)
+    PROTOTYPE: $
+    PPCODE:
+    	SV *sv=ST(0);
+	bool RETVAL;
+
+    	RETVAL=sv_utf8_decode(sv);
+	ST(0)=boolSV(RETVAL);
+	sv_2mortal(ST(0));
+	XSRETURN(1);
+
+#endif
+
+

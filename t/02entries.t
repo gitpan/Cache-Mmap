@@ -1,5 +1,5 @@
 # Test of entries() method
-# $Revision: 1.1 $
+# $Id: 02entries.t,v 1.2 2003/06/13 16:21:06 pmh Exp $
 
 use Test::More tests => 6;
 BEGIN{ use_ok('Cache::Mmap'); }
@@ -17,7 +17,7 @@ for(1..5){
   $cache->write($_,$_*$_);
 }
 
-ok(eq_set([$cache->entries],[1..5]),'simple entries()');
+ok(eq_set([$cache->entries],[1..5]),'simple entries(): '.join ' ',$cache->entries);
 
 my @entries=sort { $a->{key} cmp $b->{key} } $cache->entries(1);
 foreach(@entries){

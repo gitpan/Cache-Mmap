@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Revision: 1.3 $
+#   $Id: Makefile.PL,v 1.4 2003/06/13 16:21:49 pmh Exp $
 #
 #   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,

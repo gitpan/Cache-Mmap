@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   sccs version: 1.8    last changed: 06/07/01
+#   sccs version: 1.10    last changed: 12/28/01
 #
 #   Copyright Institute of Physics Publishing 2001
 #   You may distribute under the terms of the GPL or the Artistic License,
@@ -30,7 +30,7 @@ use vars qw(
   $VERSION
 );
 
-$VERSION='0.02';
+$VERSION='0.03';
 
 # Default cache options
 my %def_options=(
@@ -203,6 +203,37 @@ sub _set_options{
 }
 
 ################################################################################
+# Method: quick_clear()
+# Description: Clear the entire cache, without writing dirty entries
+# Author: Peter Haworth
+sub quick_clear{
+  my($self)=@_;
+
+  $self->_lock(0)
+    or croak "Can't lock cache file: $!";
+  
+  my $err;
+  eval{
+    local $SIG{__DIE__};
+
+    my $buckets=$self->buckets;
+    my $bucketsize=$self->bucketsize;
+    my $pagesize=$self->pagesize;
+    my $empty="\0" x $bucketsize;
+
+    for(0..$buckets-1){
+      substr($self->{_mmap},$pagesize+$bucketsize*$_,$bucketsize)=$empty;
+    }
+
+    1;
+  } or $err=1;
+
+  $self->_unlock;
+
+  die $@ if $err;
+}
+
+################################################################################
 # Destructor
 # Description: unmap and close the file
 # Author: Peter Haworth
@@ -345,6 +376,7 @@ sub read{
       =$self->_find($bucket,$key);
     if($found){{
       # Remove expired item, and pretend we didn't find it
+      # XXX What about dirty expired items???
       if($expired && !($flags & elem_dirty)){
 	# No need to write underlying data, because it's not dirty
 	my $bend=$bucket+$self->{bucketsize};
@@ -409,20 +441,22 @@ sub write{
     $self->_lock($bucket);
     my $err;
     eval{
+      local $SIG{__DIE__};
       my($found,$expired,$poff,$off,$_size,$_klen,$_vlen,$flags)
 	=$self->_find($bucket,$key);
 
       # Remove the old version
       if($found){
 	my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
-	my $new_filled=$filled-$size;
+	my $pre=substr $self->{_mmap},
+	    $bucket+$bheadsize,$off-($bucket+$bheadsize);
+	my $post=substr $self->{_mmap},
+	    $off+$_size,$bucket+$bheadsize+$filled-$off-$size;
+        my $new_filled=length($pre.$post);
 	my $bhead=substr(pack("lx$bheadsize",$new_filled),0,$bheadsize);
-	substr($self->{_mmap},$bucket,$filled+$bheadsize-$size)
-	  =$bhead
-	  .substr($self->{_mmap},$bucket+$bheadsize,$off-($bucket+$bheadsize))
-	  .substr($self->{_mmap},($off-$bucket)+$_size,
-	    ($bucket+$bheadsize+$filled)-(($off-$bucket)+$_size))
-	;
+
+	substr($self->{_mmap},$bucket,$bheadsize+$new_filled)
+	  =$bhead.$pre.$post;
       }
 
       # Generate new bucket contents
@@ -491,7 +525,7 @@ sub _insert{
 	  my $off=$bucket+$off;
 	  $part=~s/\\/\\\\/g;
 	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-	  warn "Zero-size entry at $off! Remaining bucket contents: $part";
+	  die "Zero-size entry at $off! Remaining bucket contents: $part";
 	  return;
 	}
 	if($flags & elem_dirty){
@@ -506,7 +540,7 @@ sub _insert{
 
     # Remove dead items
     $filled=$poff;
-    substr($content,$filled,length($content)-$filled)='';
+    substr($content,$filled)=''; # Chop off the end of the string
   }
 
   # Write the bucket
@@ -587,13 +621,13 @@ sub _find{
 
   my($found,$size,$time,$klen,$vlen,$flags,$poff);
   while($off<$end){
-    ($size,$time,$klen,$vlen,$flags)=unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
+    ($size,$time,$klen,$vlen,$flags)
+      =unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
     if(!$size){
       my $part=substr($self->{_mmap},$off,$end-$off);
       $part=~s/\\/\\\\/g;
       $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-      warn "Zero-sized entry at offset $off! Remaining bucket contents: $part";
-      return;
+      die "Zero-sized entry at offset $off! Remaining bucket contents: $part";
     }
     if($klen==$_klen && substr($self->{_mmap},$off+$eheadsize,$klen) eq $key){
       $found=1;

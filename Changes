@@ -1,3 +1,8 @@
+2001-12-28 0.03
+  Fixed serious bug in write(), which corrupted the cache file when replacing
+    an already existing entry
+    Thanks to Rob Mueller for the test case
+  
 2001-06-07 0.02
   Fixed serious bug in read(), which didn't update the current bucket content
     size when expiring entries. This caused infinite loops in _find() and

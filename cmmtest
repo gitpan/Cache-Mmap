@@ -8,10 +8,9 @@ use strict;
 
 # These will be read from the file if it already exists
 my %options=(
-  buckets => 1,
+  buckets => 11,
   bucketsize => 200,
   strings => 1,
-  expiry => 30,
 );
 
 
@@ -25,7 +24,7 @@ print "Strings: ",$cache->strings,"\n";
 $|=1;
 print "cmmtest: ";
 while(<>){
-  my($cmd,$key,$value)=/^([><0?-])\s+(\S+)(?:\s+(.*))?\s+$/
+  my($cmd,$key,$value)=/^([<>0?-])(?:\s+(\S+)(?:\s+(.*))?)?\s+$/
     or do{ warn "Invalid command\n"; next; };
   
   if($cmd eq '<'){
@@ -61,10 +60,10 @@ while(<>){
     }else{
       warn "Undefined value\n";
     }
-#  }elsif($cmd eq '0'){
-#    # clear
-#    %cache=();
-#    print "=  ok\n";
+  }elsif($cmd eq '0'){
+    # clear
+    $cache->quick_clear();
+    print "OK\n";
   }elsif($cmd eq '?'){
     # exists
     my($found,$val)=$cache->read($key);

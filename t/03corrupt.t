@@ -1,13 +1,20 @@
 # Test of behaviour wrt corrupt cache files
-# $Id: 03corrupt.t,v 1.6 2003/10/30 18:46:19 pmh Exp $
+# $Id: 03corrupt.t,v 1.7 2004/03/15 16:35:37 pmh Exp $
 
 # This test is aware of some of the structure of the cache files
 # Be careful when changing things
 
 use IO::File;
-use Test::More tests => 24;
+use Test::More tests => 26;
 use strict;
 BEGIN{ use_ok('Cache::Mmap'); }
+
+BEGIN{
+  if($]>=5.008){
+    require 'open.pm';
+    open::import(open => OUT => ':raw');
+  }
+}
 
 chdir 't' if -d 't';
 my $fname='corrupt.cmm';
@@ -69,21 +76,37 @@ ok($cache=eval{ Cache::Mmap->new($fname); },'reopened cache file 4');
 
 
 # Try accessing a file with the wrong magic number
+ok(unlink($fname),'delete old file');
 undef $cache;
-ok(open(FH,">$fname"),'creating broken file 1');
+sleep 2;
+
+ok(my $fh=IO::File->new($fname,'>'),'creating broken file 1')
+  or print "# Can't open $fname: $!\n";
 my $head=pack "l$headsize",12345;
-ok(print(FH $head),'writing broken header');
-ok(close FH,'closing boken file');
-eval{ $cache=Cache::Mmap->new($fname); };
+ok(syswrite($fh,$head,length $head),'writing broken header');
+ok(close $fh,'closing broken file');
+if(my $cache=eval{ Cache::Mmap->new($fname); }){
+  print "# $cache\n";
+}else{
+  print "# $@";
+}
 ok($@=~/not a Cache::Mmap file/,"magic number check");
 
 # Try accessing a file with a different file format
+ok(unlink($fname),'delete old file');
 undef $cache;
-ok(open(FH,">$fname"),'creating broken file 2');
+sleep 2;
+
+ok($fh=IO::File->new($fname,'>'),'creating broken file 2')
+  or print "# Can't open $fname: $!\n";
 $head=pack "l$headsize",0x15ACACE,1,2,3,4,5,6,7,8,9;
-ok(print(FH $head),'writing broken header');
-ok(close FH,'closing broken file');
-eval{ $cache=Cache::Mmap->new($fname); };
+ok(syswrite($fh,$head,length $head),'writing broken header');
+ok(close $fh,'closing broken file');
+if(my $cache=eval{ Cache::Mmap->new($fname); }){
+  print "# $cache\n";
+}else{
+  print "# $@";
+}
 ok($@=~/only supports v/,"file format version check");
 
 

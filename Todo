@@ -1,8 +1,10 @@
-$Id: Todo,v 1.5 2003/10/30 18:44:50 pmh Exp $
+$Id: Todo,v 1.6 2003/11/03 10:25:48 pmh Exp $
 
 clear(), like quick_clear(), but flushing dirty entries
 
-Untaint values read from file in _set_options() (see email)
+entry-specific expiry times (see differential-expiry)
+
+Untaint values read from file in _set_options() (see taint)
 	Actually, only the header values should be untainted
 	Cache entries should be tainted
 
@@ -20,5 +22,6 @@ Another good idea from Rob Mueller:
 	Store pointer table at beginning of bucket, and just swap pointers
 	Only move entries when deleting entries
 	What about backwards compatibility?
+	Will it need defragging?
 		
 

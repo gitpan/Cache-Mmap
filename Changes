@@ -1,9 +1,13 @@
-$Id: Changes,v 1.6 2003/10/30 18:47:54 pmh Exp $
+$Id: Changes,v 1.8 2004/03/15 16:43:22 pmh Exp $
+
+2004-03-15 0.081
+  Fix bug in t/03corrupt.t in the face of UTF8 locales
+  Escape non-printable characters in cmmtest
 
 2003-10-30 0.08
   Add CMM_keep_expired and CMM_keep_expired_refresh flags to enable temporary
       underlying data availability problems to be dealt with nicely
-  Thanks to Jeffey Friedl <jfriedl@yahoo.com>
+  Thanks to Jeffrey Friedl <jfriedl@yahoo.com>
     for the idea and initial implementation
   Document quick_clear()
   Commit all of the 0.07 changes to CVS (whoops, nearly lost them!)

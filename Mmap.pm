@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Id: Mmap.pm,v 1.11 2003/10/30 18:41:40 pmh Exp $
+#   $Id: Mmap.pm,v 1.12 2004/03/15 16:34:18 pmh Exp $
 #
 #   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,
@@ -33,7 +33,7 @@ use vars qw(
   @EXPORT_OK
 );
 
-$VERSION='0.08';
+$VERSION='0.081';
 @ISA=qw(DynaLoader Exporter);
 @EXPORT_OK=qw(CMM_keep_expired CMM_keep_expired_refresh);
 
@@ -102,7 +102,7 @@ sub new{
       or croak "'$_' option for $class must be a positive integer";
   }
   $self->{pagesize}>=$maxheadsize
-    or croak "'pagesize' options for $class must be at least $maxheadsize";
+    or croak "'pagesize' option for $class must be at least $maxheadsize";
   foreach(qw(read write delete)){
     !$self->{$_} || ref $self->{$_} eq 'CODE'
       or croak "'$_' option for $class must be a CODE ref or empty";

@@ -1,7 +1,7 @@
-#!/opt/bin/perl
+#!/usr/local/bin/perl-journals
 
 # cmmtest: test of mmapped cache
-# $Id: cmmtest,v 1.4 2003/06/12 15:47:42 pmh Exp $
+# $Id: cmmtest,v 1.5 2003/12/23 11:46:31 pmh Exp $
 
 use Cache::Mmap;
 use Data::Dumper;
@@ -12,6 +12,13 @@ my %options=(
   buckets => 11,
   bucketsize => 200,
   strings => 1,
+);
+
+my %escape=(
+  "\n" => '\n',
+  "\r" => '\r',
+  "\t" => '\t',
+  "\\" => '\\\\',
 );
 
 
@@ -38,7 +45,11 @@ while(<>){
     if(!$found){
       print "No such value\n";
     }elsif(defined $val){
-      $val=Dumper($val) unless $cache->strings;
+      if($cache->{strings}){
+        $val=~s/([^\40-\176\\])/$escape{$1} || sprintf '\\x{%02x}',ord $1/ge;
+      }else{
+	$val=Dumper($val);
+      }
       print "=> $val\n";
     }else{
       print "Undefined value\n";

@@ -1,11 +1,19 @@
-$Revision: 1.2 $
+$Revision: 1.3 $
+
+2002-08-28 0.05
+  Add the entries() method, suggested by Marc Kelly <marc@vendusia.com>
+    Actually, he wanted get_keys(), but this does more than that
+  Remove the CDROM exception in the license
+    The module is now completely Free, as in speech
+  Remove a warning from the compilation stage
+  Remove a potential warning in new()
 
 2001-12-31 0.04
   Fixed another serious bug in write(), which was introduced in the previous fix
   Move file locking into XS, so we don't need to know struct flock's layout
   Remove dependency on Mmap.pm by doing that in XS, too
     This means that it will compile on 5.6.0 without too many hassles
-  Added a test suite (well, one files so far)
+  Added a test suite (well, one file so far)
     This is how the new write() bug was caught. Yay, tests!
 
 2001-12-28 0.03

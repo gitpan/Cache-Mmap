@@ -7,13 +7,11 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Revision: 1.2 $
+#   $Revision: 1.3 $
 #
-#   Copyright Institute of Physics Publishing 2001
+#   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,
-#   as distributed with Perl, with the exception that it cannot be placed
-#   on a CD-ROM or similar media for commercial distribution without the
-#   prior approval of the author.
+#   as distributed with Perl
 #
 ################################################################################
 

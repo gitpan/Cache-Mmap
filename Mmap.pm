@@ -7,13 +7,11 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Revision: 1.2 $
+#   $Revision: 1.3 $
 #
-#   Copyright Institute of Physics Publishing 2001
+#   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,
-#   as distributed with Perl, with the exception that it cannot be placed
-#   on a CD-ROM or similar media for commercial distribution without the
-#   prior approval of the author.
+#   as distributed with Perl
 #
 ################################################################################
 
@@ -30,7 +28,7 @@ use vars qw(
   $VERSION @ISA
 );
 
-$VERSION='0.04';
+$VERSION='0.05';
 @ISA=qw(DynaLoader);
 
 __PACKAGE__->bootstrap($VERSION);
@@ -42,7 +40,7 @@ my %def_options=(
   pagesize => 1024,	# Bucket alignment
   strings => 0,		# Store strings, rather than refs
   expiry => 0,		# Number of seconds to hold values, 0==forever
-  context => undef,	# Context to pass to read and write subs
+#  context => undef,	# Context to pass to read and write subs
   permissions => 0600,	# Permissions for new file creation
 # read => sub called as ($found,$val)/$val=$read->($key,$context)
   cachenegative  => 0,	# true:  Cache not-found values
@@ -353,6 +351,75 @@ sub _unlock{
 }
 
 ################################################################################
+# Method: entries([$details])
+# Description: Return a list of keys stored in the cache
+#	Returns hashrefs with extra info if $details is true, values if 2
+#	Note that since the cache could be shared, this list may not match
+#		the cache contents by the time it is used
+# Author: Peter Haworth
+sub entries{
+  my($self,$details)=@_;
+  $details=defined($details) && $details+0;
+
+  my $buckets=$self->buckets;
+  my $bucketsize=$self->bucketsize;
+  my $pagesize=$self->pagesize;
+  my $expiry=$self->{expiry};
+
+  my @entries;
+  for(0..$buckets-1){
+    my $bucket=$pagesize+$bucketsize*$_;
+    $self->_lock($bucket);
+
+    my $err;
+    eval{
+      local $SIG{__DIE__};
+
+      my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
+      my $off=$bucket+$bheadsize;
+      my $end=$off+$filled;
+      my $size;
+      while($off<$end){
+	($size,my($time,$klen,$vlen,$flags))
+	  =unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
+	if(!$size){
+	  my $part=substr($self->{_mmap},$off,$end-$off);
+	  $part=~s/\\/\\\\/g;
+	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
+	  die "Zero-sized entry at offset $off! Remaining bucket contents: $part";
+	}
+	next if $expiry && time()-$time > $expiry;
+
+	my $key=substr $self->{_mmap},$off+$eheadsize,$klen;
+        if($details){
+	  push @entries,{
+	    key => $key,
+	    'time' => $time,
+	    dirty => $flags & elem_dirty,
+	    $details>1 ? (
+	      value => $self->_decode(
+		substr $self->{_mmap},$off+$eheadsize+$klen,$vlen
+	      ),
+	    ) : (),
+	  };
+	}else{
+	  push @entries,$key;
+	}
+      }continue{
+	$off+=$size;
+      }
+	  
+      1;
+    } or $err=1;
+    $self->_unlock;
+
+    die $@ if $err;
+  }
+
+  @entries;
+}
+
+################################################################################
 # Method: read($key)
 # Description: Read data from the cache (or from the underlying data)
 # Returns: wantarray ? ($found,$val) : $val
@@ -612,7 +679,7 @@ sub _bucket{
 sub _find{
   my($self,$bucket,$key)=@_;
   my $_klen=length $key;
-  my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$eheadsize);
+  my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
   my $off=$bucket+$bheadsize;
   my $end=$off+$filled;
 
@@ -879,6 +946,32 @@ underlying data.
 Deletes an entry from the cache, and depending on C<new()> options, from the
 underlying data.
 
+=item $cache->entries()
+
+=item $cache->entries(0)
+
+Returns a list of the keys of entries held in the cache. Note that this list
+may be immediately out of date, due to the shared nature of the cache. Entries
+may be added or removed by other processes between this list being generated
+and when it is used.
+
+=item $cache->entries(1)
+
+Returns a list of hashrefs representing entries held in the cache. The
+following keys are present in each hashref:
+
+  key    The key used to identify the entry
+  time   The time the entry was stored (seconds since the epoch)
+  dirty  Whether the entry needs writing to the underlying data
+
+The same caveat applies to the currency of this information as above.
+
+=item $cache->entries(2)
+
+As C<$cache-E<gt>entries(1)>, with the addition of a C<value> element in each
+hashref, holding the value stored in the cache entry.
+
+=back
 
 =head1 AUTHOR
 

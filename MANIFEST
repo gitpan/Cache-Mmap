@@ -8,4 +8,5 @@ Todo
 cmmtest
 ppport.h
 t/01simple.t
+t/02entries.t
 typemap

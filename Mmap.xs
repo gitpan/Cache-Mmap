@@ -1,17 +1,23 @@
 /* All the mmap() stuff is copied from Malcolm Beattie's Mmap.pm */
+
 #ifdef __cplusplus
   extern "C" {
 #endif
+
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+
 #ifdef __cplusplus
   }
 #endif
+
 #include <sys/mman.h>
 
 #ifndef MMAP_RETTYPE
-#  define _POSIX_C_SOURCE 199309
+#  ifndef _POSIX_C_SOURCE
+#    define _POSIX_C_SOURCE 199309
+#  endif
 #  ifdef _POSIX_VERSION
 #    if _POSIX_VERSION >= 199309
 #      define MMAP_RETTYPE void *

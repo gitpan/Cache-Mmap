@@ -1,4 +1,4 @@
-$Revision: 1.2 $
+$Revision: 1.3 $
 
 Flush dirty entries in quick_clear(), and rename to clear()
 
@@ -11,4 +11,14 @@ Make thread-safe
 Factor common code out of read() and write()
 
 Improve test suite
+
+Another good idea from Rob Mueller:
+> One thing I was wondering about your cache, whenever you access something,
+> it seems to move it to the front of the bucket. That's neat from a LRU
+> perspective, but couldn't you just use pointers or offsets or something
+> instead of having to move the whole data around each time you access it?
+	Store pointer table at beginning of bucket, and just swap pointers
+	Only move entries when deleting entries
+	What about backwards compatibility?
+		
 

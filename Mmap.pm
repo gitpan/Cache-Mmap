@@ -7,9 +7,9 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   sccs version: 1.7    last changed: 09/18/00
+#   sccs version: 1.8    last changed: 06/07/01
 #
-#   Copyright Institute of Physics Publishing 2000
+#   Copyright Institute of Physics Publishing 2001
 #   You may distribute under the terms of the GPL or the Artistic License,
 #   as distributed with Perl, with the exception that it cannot be placed
 #   on a CD-ROM or similar media for commercial distribution without the
@@ -30,7 +30,7 @@ use vars qw(
   $VERSION
 );
 
-$VERSION='0.01';
+$VERSION='0.02';
 
 # Default cache options
 my %def_options=(
@@ -350,6 +350,10 @@ sub read{
 	my $bend=$bucket+$self->{bucketsize};
 	substr($self->{_mmap},$off,$bend-$off)
 	  =substr($self->{_mmap},$off+$size,$bend-$off-$size).("\0" x $size);
+	my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
+	$filled-=$size;
+	substr($self->{_mmap},$bucket,$bheadsize)
+	  =substr(pack("lx$bheadsize",$filled),0,$bheadsize);
 	$found=0;
 	last;
       }
@@ -482,6 +486,14 @@ sub _insert{
       for($off=$poff;$off<$filled;){
 	my($size,$time,$vlen,$klen,$flags)
 	  =unpack 'l5',substr($content,$off,$eheadsize);
+	if(!$size){
+	  my $part=substr($content,$off,length($content)-$off);
+	  my $off=$bucket+$off;
+	  $part=~s/\\/\\\\/g;
+	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
+	  warn "Zero-size entry at $off! Remaining bucket contents: $part";
+	  return;
+	}
 	if($flags & elem_dirty){
 	  my $key=substr($content,$off+$eheadsize,$klen);
 	  my $val=$self->_decode(
@@ -576,6 +588,13 @@ sub _find{
   my($found,$size,$time,$klen,$vlen,$flags,$poff);
   while($off<$end){
     ($size,$time,$klen,$vlen,$flags)=unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
+    if(!$size){
+      my $part=substr($self->{_mmap},$off,$end-$off);
+      $part=~s/\\/\\\\/g;
+      $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
+      warn "Zero-sized entry at offset $off! Remaining bucket contents: $part";
+      return;
+    }
     if($klen==$_klen && substr($self->{_mmap},$off+$eheadsize,$klen) eq $key){
       $found=1;
       last;

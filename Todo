@@ -1,4 +1,9 @@
-Finish write()
+Untaint values read from file in _set_options() (see email)
+	Actually, only the header values should be untainted
+	Cache entries should be tainted
+
+Implement _lock()/_unlock() in XS to make more portable
+	May as well do the mmap() in private XS as well, to reduce dependencies
 
 Make thread-safe
 

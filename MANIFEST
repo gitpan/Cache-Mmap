@@ -4,3 +4,4 @@ Makefile.PL
 Mmap.pm
 README
 Todo
+cmmtest

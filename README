@@ -4,18 +4,26 @@ underlying data, access to the cache is completely transparent, and the module
 handles all the details of refreshing cache contents, and updating underlying
 data, if necessary.
 
+Changes since version 0.01
+  Fixed serious bug in read(), which didn't update the current bucket content
+    size when expiring entries. This caused infinite loops in _find() and
+    _insert(), which have also been fixed, should anything else ever go wrong
+    in a similar way
+
+
 INSTALLING
 What you need to install this module:
 	Mmap module, version 0.10 or later
+	Storable module
 How to install
 	perl Makefile.PL
 	make
 	make install
 
 
-sccs version: 1.1	last changed 09/18/00
+sccs version: 1.2	last changed 06/07/01
 
-Copyright Institute of Physics Publishing 2000
+Copyright Institute of Physics Publishing 2001
 You may distribute under the terms of the GPL or the Artistic License,
 as distributed with Perl, with the exception that it cannot be placed
 on a CD-ROM or similar media for commercial distribution without the

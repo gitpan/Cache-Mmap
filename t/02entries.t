@@ -1,7 +1,8 @@
 # Test of entries() method
-# $Id: 02entries.t,v 1.2 2003/06/13 16:21:06 pmh Exp $
+# $Id: 02entries.t,v 1.3 2003/10/30 18:45:59 pmh Exp $
 
 use Test::More tests => 6;
+use strict;
 BEGIN{ use_ok('Cache::Mmap'); }
 
 # Prepare the ground

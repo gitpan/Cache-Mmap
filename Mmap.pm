@@ -7,7 +7,7 @@
 #   Author: Peter Haworth
 #   Date created: 28/06/2000
 #
-#   $Id: Mmap.pm,v 1.9 2003/06/17 18:39:14 pmh Exp $
+#   $Id: Mmap.pm,v 1.11 2003/10/30 18:41:40 pmh Exp $
 #
 #   Copyright Institute of Physics Publishing 2002
 #   You may distribute under the terms of the GPL or the Artistic License,
@@ -17,21 +17,25 @@
 
 package Cache::Mmap;
 
-use constant has_utf8 => $^V ge "\5\6\0";
-use DynaLoader();
-use Storable qw(freeze thaw);
-use Fcntl;
-use Symbol();
-use IO::Seekable qw(SEEK_SET SEEK_END);
+use constant has_utf8 => defined($^V) && $^V ge "\5\6\0";
+
 use Carp qw(croak);
+use DynaLoader();
+use Exporter;
+use Fcntl;
+use IO::Seekable qw(SEEK_SET SEEK_END);
+use Storable qw(freeze thaw);
+use Symbol();
 use integer;
 use strict;
 use vars qw(
   $VERSION @ISA
+  @EXPORT_OK
 );
 
-$VERSION='0.07';
-@ISA=qw(DynaLoader);
+$VERSION='0.08';
+@ISA=qw(DynaLoader Exporter);
+@EXPORT_OK=qw(CMM_keep_expired CMM_keep_expired_refresh);
 
 __PACKAGE__->bootstrap($VERSION);
 
@@ -42,7 +46,7 @@ my %def_options=(
   pagesize => 1024,	# Bucket alignment
   strings => 0,		# Store strings, rather than refs
   expiry => 0,		# Number of seconds to hold values, 0==forever
-#  context => undef,	# Context to pass to read and write subs
+  context => undef,	# Context to pass to read and write subs
   permissions => 0600,	# Permissions for new file creation
 # read => sub called as ($found,$val)/$val=$read->($key,$context)
   cachenegative  => 0,	# true:  Cache not-found values
@@ -76,6 +80,10 @@ my $eheadsize=4*10; # Element: size, time, klen, vlen, flags
 my $maxheadsize=$headsize > $bheadsize ? $headsize : $bheadsize;
 $maxheadsize=$eheadsize if $eheadsize > $maxheadsize;
 
+# While these look random, the low word could be a bitmask
+use constant CMM_keep_expired =>         0xCACE0001; # Keep the expired value
+use constant CMM_keep_expired_refresh => 0xCACE0003; # Keep the expired value, and unexpire it
+
 ################################################################################
 # Class method: new($filename,\%options)
 # Description: Open a shared cache file, creating it if necessary
@@ -90,7 +98,7 @@ sub new{
 
   # Check options for sensible values
   foreach(qw(buckets bucketsize pagesize permissions)){
-    $self->{$_}=~/^[1-9]\d*$/s
+    defined($self->{$_}) && $self->{$_}=~/^[1-9]\d*$/s
       or croak "'$_' option for $class must be a positive integer";
   }
   $self->{pagesize}>=$maxheadsize
@@ -113,7 +121,7 @@ sub new{
   my $fh=Symbol::gensym;
   sysopen($fh,$filename,O_RDWR|O_CREAT,$self->{permissions})
     or croak "Can't open cache file $filename: $!";
-  
+
   # Create cache object
   bless $self,$class;
   $self->{_filename}=$filename;
@@ -136,7 +144,7 @@ sub _set_options{
   # Lock file, so only one process sets the size
   $self->_lock(0)
     or croak "Can't lock cache file: $!";
-  
+
   my $err;
   eval{
     local $SIG{__DIE__};
@@ -219,7 +227,7 @@ sub quick_clear{
 
   $self->_lock(0)
     or croak "Can't lock cache file: $!";
-  
+
   my $err;
   eval{
     local $SIG{__DIE__};
@@ -415,7 +423,7 @@ sub entries{
       }continue{
 	$off+=$size;
       }
-	  
+
       1;
     } or $err=1;
     $self->_unlock;
@@ -446,6 +454,34 @@ sub read{
 
     ($found,my($expired,$poff,$off,$size,$klen,$vlen,$flags))
       =$self->_find($bucket,$key);
+
+    # We need to read a new value if we don't have a value,
+    # or if that value is expired.
+    my ($new_found, $new_val);
+    if (!$found or $expired) {
+      my @_read=$self->{read}
+	? $self->{read}->($key,$self->{context}) : ();
+      ($new_found,$new_val)=@_read==1 ? (defined($_read[0]),$_read[0]) : @_read;
+      $new_found=0 if !defined $new_found;
+      undef $new_val unless $new_found;
+
+      if($new_found==CMM_keep_expired){
+	# Use the old value, even though it's expired
+        $found=$expired;
+	$expired=0;
+	$new_found=0;
+      }elsif($new_found==CMM_keep_expired_refresh){
+	# Use the old value, and update its time so it's not expired anymore
+        $found=$expired;
+	$expired=0;
+	$new_found=0;
+
+	# Modify the time field in a hideously unmaintainable way
+	substr($self->{_mmap},$off+4,4)=pack 'l',time
+	  if $found;
+      }
+    }
+
     if($found){{
       # Remove expired item, and pretend we didn't find it
       # XXX What about dirty expired items???
@@ -458,7 +494,7 @@ sub read{
 	$filled-=$size;
 	substr($self->{_mmap},$bucket,$bheadsize)
 	  =substr(pack("lx$bheadsize",$filled),0,$bheadsize);
-	$found=0;
+	$found=0; # it's expired, so pretend we didn't find anything
 	last;
       }
       # Swap with previous item unless at head of bucket
@@ -472,9 +508,8 @@ sub read{
       $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
     }}
     if(!$found){
-      my @_read=$self->{read}
-	? $self->{read}->($key,$self->{context}) : ();
-      ($found,$val)=@_read==1 ? (defined($_read[0]),$_read[0]) : @_read;
+      # go ahead and use the new data, read above
+      ($found,$val)=($new_found,$new_val);
 
       # Store value in cache
       if($found || $self->{cachenegative}){
@@ -640,7 +675,7 @@ sub delete{
 
     ($found,my($expired,$poff,$off,$size,$klen,$vlen,$flags))
       =$self->_find($bucket,$key);
-    
+
     if($found){
       $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
       if(my $dsub=$self->{delete} and !($flags & elem_dirty)){
@@ -690,7 +725,6 @@ sub _bucket{
 # Returns: ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags)
 sub _find{
   my($self,$bucket,$key)=@_;
-#  my $_klen=length $key;
   my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
   my $off=$bucket+$bheadsize;
   my $end=$off+$filled;
@@ -711,6 +745,7 @@ sub _find{
       if($poff){
 	$prev=" [poff=$poff]";
       }
+      local $^W;
       die "Zero-sized entry in $self->{_filename}, offset $off! [bucket=$bucket][key=$key]$prev Remaining bucket contents: $part";
     }
     if($self->_decode(substr($self->{_mmap},$off+$eheadsize,$klen),1) eq $key){
@@ -724,13 +759,13 @@ sub _find{
   return unless $found;
 
   my $expired;
-  if(my $exp=$self->expiry){
+  if($found and my $exp=$self->expiry){
     $expired=time-$time>$exp;
   }
 
   return ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags);
 }
-    
+
 ################################################################################
 # Internal method: _encode($value,$is_key)
 # Description: Encodes the given value into a string
@@ -814,10 +849,10 @@ the cache is completely transparent, and the module handles all the details of
 refreshing cache contents, and updating underlying data, if necessary.
 
 Cache entries are assigned to "buckets" within the cache file, depending on
-the key. Within each bucket, entries are stored apporximately in order of last
+the key. Within each bucket, entries are stored approximately in order of last
 access, so that frequently accessed entries will move to the head of the
 bucket, thus decreasing access time. Concurrent accesses to the same bucket are
-prevented by file locking of the relevent section of the cache file.
+prevented by file locking of the relevant section of the cache file.
 
 =head1 METHODS
 
@@ -829,7 +864,7 @@ Creates a new cache object. If the file named by C<$filename> does not already
 exist, it will be created.  Various options may be set in C<%options>, which
 affect the behaviour of the cache (defaults in parentheses):
 
-=over 8
+=over 4
 
 =item permissions (0600)
 
@@ -877,9 +912,36 @@ context. This will typically be a database handle, used to fetch data from.
 Provides a code reference to a routine which will fetch entries from the
 underlying data. Called as C<$read-E<gt>($key,$context)>, this routine should
 return a list C<($found,$value)>, where C<$found> is true if the entry could
-be found in the underlying data, and C<$value> is the value to cache, or
-C<undef> if not found. If this routine is not provided, only values already
-in the cache will ever be returned.
+be found in the underlying data, and C<$value> is the value to cache.
+
+If the routine only returns a single scalar, that will be taken as
+the value, and C<$found> will be set to true if the value is defined.
+
+If this routine is not provided, only values already in the cache will ever
+be returned.
+
+There are currently two special values of C<$found> which cause slightly
+different behaviour. These are constants which may be imported in the
+C<use> statement.
+
+=over 4
+
+=item C<Cache::Mmap::CMM_keep_expired>
+
+Use the previously cached value, even if it has expired. This is useful if
+the underlying data source has become unavailable for some reason. Note that
+even though the value returned will be ignored in this case, it must be
+returned to avoid C<$found> being interpreted as a single scalar:
+
+  return (Cache::Mmap::CMM_keep_expired, undef);
+
+=item C<Cache::Mmap::CMM_keep_expired_refresh>
+
+This causes the same behaviour as C<CMM_keep_expired>, but the cache entry's
+expiry time will be reset as if a value had been successfully read from the
+underlying data.
+
+=back
 
 =item cachenegative (0)
 
@@ -1007,6 +1069,11 @@ The same caveat applies to the currency of this information as above.
 
 As C<$cache-E<gt>entries(1)>, with the addition of a C<value> element in each
 hashref, holding the value stored in the cache entry.
+
+=item $cache->quick_clear()
+
+Forcefully delete the cache, with prejudice: unwritten dirty elements are B<not>
+written; they are thrown away.
 
 =back
 

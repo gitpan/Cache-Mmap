@@ -1,0 +1,8 @@
+Finish write()
+
+Make thread-safe
+
+Factor common code out of read() and write()
+
+Proper test suite
+

@@ -1,4 +1,12 @@
-$Id: Changes,v 1.8 2004/03/15 16:43:22 pmh Exp $
+$Id: Changes,v 1.9 2005/11/15 18:35:19 pmh Exp $
+
+2005-11-15 0.09
+  Bug fix:
+    Unlock the file before mmap(), as mandated by the spec
+    Return useful values from XS
+  Thanks to Janardhan Molumuri <mjanardhan@gmail.com>
+    for being bitten by this, and for assistance in fixing it
+  Minor documentation improvements
 
 2004-03-15 0.081
   Fix bug in t/03corrupt.t in the face of UTF8 locales

@@ -1,22 +1,37 @@
-################################################################################
-#
-#   File name: Mmap.pm
-#   Project: Cache::Mmap
-#   Description: Shared mmap cache
-#
-#   Author: Peter Haworth
-#   Date created: 28/06/2000
-#
-#   $Id: Mmap.pm,v 1.12 2004/03/15 16:34:18 pmh Exp $
-#
-#   Copyright Institute of Physics Publishing 2002
-#   You may distribute under the terms of the GPL or the Artistic License,
-#   as distributed with Perl
-#
-################################################################################
+# $Id: Mmap.pm,v 1.13 2005/11/15 18:33:29 pmh Exp $
+
+=head1 NAME
+
+Cache::Mmap - Shared data cache using memory mapped files
+
+=head1 SYNOPSIS
+
+  use Cache::Mmap;
+
+  $cache=Cache::Mmap->new($filename,\%options);
+
+  $val1=$cache->read($key1);
+  $cache->write($key2,$val2);
+  $cache->delete($key3);
+
+=head1 DESCRIPTION
+
+This module implements a shared data cache, using memory mapped files.
+If routines are provided which interact with the underlying data, access to
+the cache is completely transparent, and the module handles all the details of
+refreshing cache contents, and updating underlying data, if necessary.
+
+Cache entries are assigned to "buckets" within the cache file, depending on
+the key. Within each bucket, entries are stored approximately in order of last
+access, so that frequently accessed entries will move to the head of the
+bucket, thus decreasing access time. Concurrent accesses to the same bucket are
+prevented by file locking of the relevant section of the cache file.
+
+=cut
 
 package Cache::Mmap;
 
+# Do we need to worry about UTF-8?
 use constant has_utf8 => defined($^V) && $^V ge "\5\6\0";
 
 use Carp qw(croak);
@@ -33,7 +48,7 @@ use vars qw(
   @EXPORT_OK
 );
 
-$VERSION='0.081';
+$VERSION='0.09';
 @ISA=qw(DynaLoader Exporter);
 @EXPORT_OK=qw(CMM_keep_expired CMM_keep_expired_refresh);
 
@@ -84,11 +99,141 @@ $maxheadsize=$eheadsize if $eheadsize > $maxheadsize;
 use constant CMM_keep_expired =>         0xCACE0001; # Keep the expired value
 use constant CMM_keep_expired_refresh => 0xCACE0003; # Keep the expired value, and unexpire it
 
-################################################################################
-# Class method: new($filename,\%options)
-# Description: Open a shared cache file, creating it if necessary
-#	THIS ROUTINE DIES ON FAILURE
-# Author: Peter Haworth
+
+=head1 CLASS METHODS
+
+=over
+
+=item new($filename,\%options)
+
+Creates a new cache object. If the file named by C<$filename> does not already
+exist, it will be created. If the cache object cannot be created for any
+reason, an exception will be thrown. Various options may be set in C<%options>,
+which affect the behaviour of the cache (defaults in parentheses):
+
+=over 4
+
+=item permissions (0600)
+
+Sets the file permissions for the cache file if it doesn't already exist.
+
+=item buckets (13)
+
+Sets the number of buckets inside the cache file. A larger number of buckets
+will give better performance for a cache with many accesses, as there will be
+less chance of concurrent access to the same bucket.
+
+=item bucketsize (1024)
+
+Sets the size of each bucket, in bytes. A larger bucket size will be needed to
+store large cache entries. If the bucketsize is not large enough to hold a
+particular entry, it will still be passed between the underlying data and the
+application in its entirety, but will not be stored in the cache.
+
+=item pagesize (1024)
+
+Sets the alignment of buckets within the file. The file header will be extended
+to this size, and bucket sizes will be rounded up to the nearest multiple.
+Choosing a pagesize equal to the virtual memory page size of the host system
+should improve performance.
+
+=item strings (0)
+
+If true, cache entries are treated as strings, rather than references. This
+will help performance for string-only caches, as no time will be taken to
+serialize cache entries.
+
+=item expiry (0)
+
+If non-zero, sets the length of time, in seconds, which cache entries are
+considered valid. A new entry will be fetched from the underlying data if
+an expired cache entry would otherwise have been returned.
+
+=item context (undef)
+
+This value is passed to the read/write/delete routines below, to provide
+context. This will typically be a database handle, used to fetch data from.
+
+=item read (undef)
+
+Provides a code reference to a routine which will fetch entries from the
+underlying data. Called as C<$read-E<gt>($key,$context)>, this routine should
+return a list C<($found,$value)>, where C<$found> is true if the entry could
+be found in the underlying data, and C<$value> is the value to cache.
+
+If the routine only returns a single scalar, that will be taken as
+the value, and C<$found> will be set to true if the value is defined.
+
+If this routine is not provided, only values already in the cache will ever
+be returned.
+
+There are currently two special values of C<$found> which cause slightly
+different behaviour. These are constants which may be imported in the
+C<use> statement.
+
+=over 4
+
+=item C<Cache::Mmap::CMM_keep_expired>
+
+Use the previously cached value, even if it has expired. This is useful if
+the underlying data source has become unavailable for some reason. Note that
+even though the value returned will be ignored in this case, it must be
+returned to avoid C<$found> being interpreted as a single scalar:
+
+  return (Cache::Mmap::CMM_keep_expired, undef);
+
+=item C<Cache::Mmap::CMM_keep_expired_refresh>
+
+This causes the same behaviour as C<CMM_keep_expired>, but the cache entry's
+expiry time will be reset as if a value had been successfully read from the
+underlying data.
+
+=back
+
+=item cachenegative (0)
+
+If true, even unsuccessful fetches from the underlying data are cached. This
+can be useful to only search the underlying data once for each required key.
+
+=item write (undef)
+
+Provides a code reference to a routine which will write cache entries into the
+underlying data. This routine will be called by write(), to synchronise the
+underlying data with the cache. Called as C<$write-E<gt>($key,$val,$context)>.
+If the routine is not provided, the underlying data will not be synchronised
+after cache writes.
+
+=item writethrough (1)
+
+If true, the C<write> routine above will be called as soon as
+write() is called. This provides immediate synchronisation of
+underlying data and cache contents.
+
+If false, the C<write> routine will
+be called for each cache entry which no longer fits in its bucket after a
+cache read or write. This provides a write-as-necessary behaviour, which may
+be more efficient than the writethrough behaviour. However, only data fetched
+through the cache will reflect these changes.
+
+=item delete (undef)
+
+Provides a code reference to a routine which will delete items from the
+underlying data. This routine will be called by delete(),
+to synchronise the underlying data with the cache. Called as
+C<$delete-E<gt>($key,$cval,$context)>, where C<$cval> is the value
+currently stored in the cache. If this routine is not provided, entries
+deleted from the cache have no effect on the underlying data.
+
+=back
+
+An alternative to supplying a C<write> routine, is to call
+delete() after updating the underlying data. Note however, that
+in the case of databases, this should be done after committing the update, so
+that a concurrent process doesn't reload the cache between being the entry
+being deleted, and the database updates being committed.
+
+=cut
+
 sub new{
   my($class,$filename,$options)=@_;
   my $self={
@@ -133,312 +278,25 @@ sub new{
   $self;
 }
 
-################################################################################
-# Internal method: _set_options()
-# Description: Set options for a new cache, or read existing options
-#	THIS ROUTINE DIES ON FAILURE
-# Author: Peter Haworth
-sub _set_options{
-  my($self)=@_;
+=back
 
-  # Lock file, so only one process sets the size
-  $self->_lock(0)
-    or croak "Can't lock cache file: $!";
+=head1 METHODS
 
-  my $err;
-  eval{
-    local $SIG{__DIE__};
+=head2 CACHE DATA METHODS
 
-    # If the file is big enough to contain a header, attempt to read one
-    my $size_cur= -s $self->{_fh};
-    my $magic_ok;
-    if($size_cur>=$headsize){
-      my $head;
-      if((my $bytes=sysread($self->{_fh},$head,$headsize))!=$headsize){
-	croak "Expecting $headsize bytes, read $bytes from cache header\n";
-      }
-      my($mg,$buckets,$bucketsize,$pagesize,$flags,$format)=unpack('l6',$head);
-      $mg==magic
-        or croak "$self->{_filename} is not a Cache::Mmap file";
-      ($format+=0)==filevers
-        or croak "$self->{_filename} uses v$format data structures. Cache::Mmap $VERSION only supports v".filevers." data structures";
+These are the everyday methods used to access the data stored by the cache.
 
-      $self->{buckets}=$buckets;
-      $self->{bucketsize}=$bucketsize;
-      $self->{pagesize}=$pagesize;
-      while(my($opt,$bit)=each %bool_opts){
-	$self->{$opt}=!!($flags&$bit);
-      }
-      $magic_ok=1;
-    }
+=over 4
 
-    # Make sure the file is big enough for the whole cache
-    my $size=$self->{pagesize}+$self->{buckets}*$self->{bucketsize};
-    if($size_cur < $size){
-      my $pad="\0" x 1024;
-      sysseek $self->{_fh},SEEK_END,0
-	or croak "Can't seek to end of file: $!\n";
-      while($size_cur < $size){
-	my $len=syswrite($self->{_fh},$pad,1024)
-	  or croak "Can't pad file: $!";
-	$size_cur+=$len;
-      }
-      -s $self->{_fh} >= $size
-	or croak "Failed to set correct file size\n";
-    }
+=item read($key)
 
-    # Write file header if it's not already done
-    if(!$magic_ok){
-      my $flags=0;
-      while(my($opt,$bit)=each %bool_opts){
-	$flags|=$bit if $self->{$opt};
-      }
-      my $head=pack("l6x$headsize",
-	magic,@$self{'buckets','bucketsize','pagesize'},$flags,filevers
-      );
-      sysseek $self->{_fh},SEEK_SET,0
-	or croak "Can't seek to beginning: $!";
-      syswrite($self->{_fh},$head,$headsize)==$headsize
-	or croak "Can't write file header: $!";
-    }
+Reads an entry from the cache, or from the underlying data if not cached.
+Returns the value in scalar context, and C<($found,$value)> in list context,
+where C<$found> is true if the item was found in either the cache or the
+underlying data.
 
-    mmap($self->{_mmap}='',$size,$self->{_fh})
-      or do{
-	delete $self->{_mmap};
-	croak "Can't mmap $self->{_filename}: $!";
-      };
+=cut
 
-    1;
-  } or $err=1;
-
-  # Unlock file before returning
-  $self->_unlock;
-
-  # Return success or die
-  die $@ if $err;
-}
-
-################################################################################
-# Method: quick_clear()
-# Description: Clear the entire cache, without writing dirty entries
-# Author: Peter Haworth
-sub quick_clear{
-  my($self)=@_;
-
-  $self->_lock(0)
-    or croak "Can't lock cache file: $!";
-
-  my $err;
-  eval{
-    local $SIG{__DIE__};
-
-    my $buckets=$self->buckets;
-    my $bucketsize=$self->bucketsize;
-    my $pagesize=$self->pagesize;
-    my $empty="\0" x $bucketsize;
-
-    for(0..$buckets-1){
-      substr($self->{_mmap},$pagesize+$bucketsize*$_,$bucketsize)=$empty;
-    }
-
-    1;
-  } or $err=1;
-
-  $self->_unlock;
-
-  die $@ if $err;
-}
-
-################################################################################
-# Destructor
-# Description: unmap and close the file
-# Author: Peter Haworth
-sub DESTROY{
-  my($self)=@_;
-
-  munmap($self->{_mmap}) if exists $self->{_mmap};
-  close $self->{_fh};
-}
-
-################################################################################
-# Method: buckets()
-# Description: Return the number of buckets the cache has
-# Author: Peter Haworth
-sub buckets{
-  my($self)=@_;
-
-  $self->{buckets};
-}
-
-################################################################################
-# Method: bucketsize()
-# Description: Return the bucket size of the cache
-# Author: Peter Haworth
-sub bucketsize{
-  my($self)=@_;
-
-  $self->{bucketsize};
-}
-
-################################################################################
-# Method: pagesize()
-# Description: Return the page size of the cache
-# Author: Peter Haworth
-sub pagesize{
-  my($self)=@_;
-
-  $self->{pagesize};
-}
-
-################################################################################
-# Method: strings()
-# Description: Return true if the cache stores strings, rather than refs
-# Author: Peter Haworth
-sub strings{
-  my($self)=@_;
-
-  $self->{strings};
-}
-
-################################################################################
-# Method: expiry()
-# Description: Return the number of seconds values are cached for
-# Author: Peter Haworth
-sub expiry{
-  my($self)=@_;
-
-  $self->{expiry};
-}
-
-################################################################################
-# Method: writethrough()
-# Description: Return true if writes go directly to the underlying data
-# Author: Peter Haworth
-sub writethrough{
-  my($self)=@_;
-
-  $self->{writethrough};
-}
-
-################################################################################
-# Method: cachenegative()
-# Description: Return true if not-found values are cached
-# Author: Peter Haworth
-sub cachenegative{
-  my($self)=@_;
-
-  $self->{cachenegative};
-}
-
-################################################################################
-# Method: context([$context])
-# Description: Get or set the read/write context
-# Author: Peter Haworth
-sub context{
-  my $self=shift;
-
-  @_ ? ($self->{context}=$_[0]) : $self->{context};
-}
-
-################################################################################
-# Internal method: _lock($offset)
-# Description: Lock the cache file.
-#	If $offset is zero, lock the file header
-#	Otherwise, lock the bucket starting at $offset
-# XXX This also needs to create an internal lock if threading
-# Author: Peter Haworth
-sub _lock{
-  my($self,$offset)=@_;
-  my $length=$offset ? $self->{bucketsize} : $headsize;
-
-  _lock_xs($self->{_fh},$offset,$length,1);
-}
-
-################################################################################
-# Internal method: _unlock()
-# Description: Remove all locks from the file
-# XXX This needs to unlock internal lock and take an offset arg if threading
-# Author: Peter Haworth
-sub _unlock{
-  my($self)=@_;
-
-  _lock_xs($self->{_fh},0,0,0);
-}
-
-################################################################################
-# Method: entries([$details])
-# Description: Return a list of keys stored in the cache
-#	Returns hashrefs with extra info if $details is true, values if 2
-#	Note that since the cache could be shared, this list may not match
-#		the cache contents by the time it is used
-# Author: Peter Haworth
-sub entries{
-  my($self,$details)=@_;
-  $details=defined($details) && $details+0;
-
-  my $buckets=$self->buckets;
-  my $bucketsize=$self->bucketsize;
-  my $pagesize=$self->pagesize;
-  my $expiry=$self->expiry;
-
-  my @entries;
-  for(0..$buckets-1){
-    my $bucket=$pagesize+$bucketsize*$_;
-    $self->_lock($bucket);
-
-    my $err;
-    eval{
-      local $SIG{__DIE__};
-
-      my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
-      my $off=$bucket+$bheadsize;
-      my $end=$off+$filled;
-      my $size;
-      while($off<$end){
-	($size,my($time,$klen,$vlen,$flags))
-	  =unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
-	if(!$size){
-	  my $part=substr($self->{_mmap},$off,$end-$off);
-	  $part=~s/\\/\\\\/g;
-	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
-	  die "Zero-sized entry in $self->{_filename}, offset $off! Remaining bucket contents: $part";
-	}
-	next if $expiry && time()-$time > $expiry;
-
-	my $key=$self->_decode(substr($self->{_mmap},$off+$eheadsize,$klen),1);
-        if($details){
-	  push @entries,{
-	    key => $key,
-	    'time' => $time,
-	    dirty => $flags & elem_dirty,
-	    $details>1 ? (
-	      value => $self->_decode(
-		substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0
-	      ),
-	    ) : (),
-	  };
-	}else{
-	  push @entries,$key;
-	}
-      }continue{
-	$off+=$size;
-      }
-
-      1;
-    } or $err=1;
-    $self->_unlock;
-
-    die $@ if $err;
-  }
-
-  @entries;
-}
-
-################################################################################
-# Method: read($key)
-# Description: Read data from the cache (or from the underlying data)
-# Returns: wantarray ? ($found,$val) : $val
-# Author: Peter Haworth
 sub read{
   my($self,$key)=@_;
   my $bucket=$self->_bucket($key);
@@ -529,11 +387,13 @@ sub read{
   return ($found,$val);
 }
 
-################################################################################
-# Method: write($key,$val)
-# Description: Write the specified item into the cache (and underlying data)
-# Returns: $val
-# Author: Peter Haworth
+=item write($key,$val)
+
+Writes an entry into the cache, and depending on the configuration, into the
+underlying data.
+
+=cut
+
 sub write{
   my($self,$key,$val)=@_;
   my $ekey=$self->_encode($key,1);
@@ -592,11 +452,448 @@ sub write{
   1;
 }
 
-################################################################################
-# Internal Method: _insert($bucket,$ekey,$eval,$write)
-# Description: Insert the key/value pair into the bucket
-#	$write is true if this is a cache write
-# Author: Peter Haworth
+=item delete($key)
+
+Deletes an entry from the cache, and depending on C<new()> options, from the
+underlying data.
+Returns the value in scalar context, and C<($found,$value)> in list context,
+where C<$found> is true if the item was found in the cache.
+
+=cut
+
+sub delete{
+  my($self,$key)=@_;
+  my $bucket=$self->_bucket($key);
+
+  # Lock the bucket
+  $self->_lock($bucket);
+
+  my($found,$val,$err);
+  eval{
+    local $SIG{__DIE__};
+
+    ($found,my($expired,$poff,$off,$size,$klen,$vlen,$flags))
+      =$self->_find($bucket,$key);
+
+    if($found){
+      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
+      if(my $dsub=$self->{delete} and !($flags & elem_dirty)){
+	$dsub->($key,$val,$self->{context});
+      }
+      my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
+      my $new_filled=$filled-$size;
+      substr($self->{_mmap},$bucket,$bheadsize)
+	=substr(pack("lx$bheadsize",$new_filled),0,$bheadsize);
+
+      my $fill_end=$bucket+$bheadsize+$filled;
+      my $elem_end=$off+$size;
+      substr($self->{_mmap},$off,$fill_end-$elem_end)
+        =substr($self->{_mmap},$elem_end,$fill_end-$elem_end);
+    }
+
+    1;
+  } or $err=1;
+  $self->_unlock;
+
+  # Propagate errors
+  die $@ if $err;
+
+  return ($found,$val);
+}
+
+=item entries()
+
+=item entries(0)
+
+Returns a list of the keys of entries held in the cache. Note that this list
+may be immediately out of date, due to the shared nature of the cache. Entries
+may be added or removed by other processes between this list being generated
+and when it is used.
+
+=item entries(1)
+
+Returns a list of hashrefs representing entries held in the cache. The
+following keys are present in each hashref:
+
+  key    The key used to identify the entry
+  time   The time the entry was stored (seconds since the epoch)
+  dirty  Whether the entry needs writing to the underlying data
+
+The same caveat applies to the currency of this information as above.
+
+=item entries(2)
+
+As C<entries(1)>, with the addition of a C<value> element in each
+hashref, holding the value stored in the cache entry.
+
+=cut
+
+sub entries{
+  my($self,$details)=@_;
+  $details=defined($details) && $details+0;
+
+  my $buckets=$self->buckets;
+  my $bucketsize=$self->bucketsize;
+  my $pagesize=$self->pagesize;
+  my $expiry=$self->expiry;
+
+  my @entries;
+  for(0..$buckets-1){
+    my $bucket=$pagesize+$bucketsize*$_;
+    $self->_lock($bucket);
+
+    my $err;
+    eval{
+      local $SIG{__DIE__};
+
+      my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
+      my $off=$bucket+$bheadsize;
+      my $end=$off+$filled;
+      my $size;
+      while($off<$end){
+	($size,my($time,$klen,$vlen,$flags))
+	  =unpack 'l5',substr $self->{_mmap},$off,$eheadsize;
+	if(!$size){
+	  my $part=substr($self->{_mmap},$off,$end-$off);
+	  $part=~s/\\/\\\\/g;
+	  $part=~s/([^\040-\176])/sprintf '\\%02x',ord $1/ge;
+	  die "Zero-sized entry in $self->{_filename}, offset $off! Remaining bucket contents: $part";
+	}
+	next if $expiry && time()-$time > $expiry;
+
+	my $key=$self->_decode(substr($self->{_mmap},$off+$eheadsize,$klen),1);
+        if($details){
+	  push @entries,{
+	    key => $key,
+	    'time' => $time,
+	    dirty => $flags & elem_dirty,
+	    $details>1 ? (
+	      value => $self->_decode(
+		substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0
+	      ),
+	    ) : (),
+	  };
+	}else{
+	  push @entries,$key;
+	}
+      }continue{
+	$off+=$size;
+      }
+
+      1;
+    } or $err=1;
+    $self->_unlock;
+
+    die $@ if $err;
+  }
+
+  @entries;
+}
+
+=item quick_clear()
+
+Forcefully delete the cache, with prejudice. Unwritten dirty elements are B<not>
+written back to the underlying data source; they are simply thrown away.
+
+=cut
+
+sub quick_clear{
+  my($self)=@_;
+
+  $self->_lock(0)
+    or croak "Can't lock cache file: $!";
+
+  my $err;
+  eval{
+    local $SIG{__DIE__};
+
+    my $buckets=$self->buckets;
+    my $bucketsize=$self->bucketsize;
+    my $pagesize=$self->pagesize;
+    my $empty="\0" x $bucketsize;
+
+    for(0..$buckets-1){
+      substr($self->{_mmap},$pagesize+$bucketsize*$_,$bucketsize)=$empty;
+    }
+
+    1;
+  } or $err=1;
+
+  $self->_unlock;
+
+  die $@ if $err;
+}
+
+=back
+
+=head2 CONFIGURATION METHODS
+
+These methods are used to examine/update the configuration of a cache.
+Most of these methods are read-only, and the value returned may be different
+to that passed to the constructor, since the cache may have been created by
+an earlier process which specified different parameters.
+
+=over
+
+=item buckets()
+
+Returns the number of buckets in the cache file.
+
+=cut
+
+sub buckets{
+  my($self)=@_;
+
+  $self->{buckets};
+}
+
+=item bucketsize()
+
+Returns the size of buckets (in bytes) in the cache file.
+
+=cut
+
+sub bucketsize{
+  my($self)=@_;
+
+  $self->{bucketsize};
+}
+
+=item cachenegative()
+
+Returns true if items not found in the underlying data are cached anyway.
+
+=cut
+
+sub cachenegative{
+  my($self)=@_;
+
+  $self->{cachenegative};
+}
+
+=item context()
+
+Returns the context data for reads and writes to the underlying data.
+
+=item context($context)
+
+Provides new context data for reads and writes to the underlying data.
+
+=cut
+
+sub context{
+  my $self=shift;
+
+  @_ ? ($self->{context}=$_[0]) : $self->{context};
+}
+
+=item expiry()
+
+Returns the time in seconds cache entries are considered valid for, or zero
+for indefinite validity.
+
+=cut
+
+sub expiry{
+  my($self)=@_;
+
+  $self->{expiry};
+}
+
+=item pagesize()
+
+Returns the page size (in bytes) of the cache file.
+
+=cut
+
+sub pagesize{
+  my($self)=@_;
+
+  $self->{pagesize};
+}
+
+=item strings()
+
+Returns true if the cache stores strings rather than references.
+
+=cut
+
+sub strings{
+  my($self)=@_;
+
+  $self->{strings};
+}
+
+=item writethrough()
+
+Returns true if items written to the cache are immediately written to the
+underlying data.
+
+=cut
+
+sub writethrough{
+  my($self)=@_;
+
+  $self->{writethrough};
+}
+
+=back
+
+=begin private
+
+=head1 PRIVATE METHODS
+
+These methods are for internal use only, and are not for general consumption.
+
+=over
+
+=item _set_options()
+
+If the cache already exists, read its options. Otherwise, set them according
+to the values passed to the constructor.
+
+This method should only be called by the constructor.
+
+=cut
+
+sub _set_options{
+  my($self)=@_;
+
+  # Lock file, so only one process sets the size
+  $self->_lock(0)
+    or croak "Can't lock cache file: $!";
+
+  my $err;
+  eval{
+    local $SIG{__DIE__};
+
+    # If the file is big enough to contain a header, attempt to read one
+    my $size_cur= -s $self->{_fh};
+    my $magic_ok;
+    if($size_cur>=$headsize){
+      my $head;
+      if((my $bytes=sysread($self->{_fh},$head,$headsize))!=$headsize){
+	croak "Expecting $headsize bytes, read $bytes from cache header\n";
+      }
+      my($mg,$buckets,$bucketsize,$pagesize,$flags,$format)=unpack('l6',$head);
+      $mg==magic
+        or croak "$self->{_filename} is not a Cache::Mmap file";
+      ($format+=0)==filevers
+        or croak "$self->{_filename} uses v$format data structures. Cache::Mmap $VERSION only supports v".filevers." data structures";
+
+      $self->{buckets}=$buckets;
+      $self->{bucketsize}=$bucketsize;
+      $self->{pagesize}=$pagesize;
+      while(my($opt,$bit)=each %bool_opts){
+	$self->{$opt}=!!($flags&$bit);
+      }
+      $magic_ok=1;
+    }
+
+    # Make sure the file is big enough for the whole cache
+    my $size=$self->{pagesize}+$self->{buckets}*$self->{bucketsize};
+    if($size_cur < $size){
+      my $pad="\0" x 1024;
+      sysseek $self->{_fh},SEEK_END,0
+	or croak "Can't seek to end of file: $!\n";
+      while($size_cur < $size){
+	my $len=syswrite($self->{_fh},$pad,1024)
+	  or croak "Can't pad file: $!";
+	$size_cur+=$len;
+      }
+      -s $self->{_fh} >= $size
+	or croak "Failed to set correct file size\n";
+    }
+
+    # Write file header if it's not already done
+    if(!$magic_ok){
+      my $flags=0;
+      while(my($opt,$bit)=each %bool_opts){
+	$flags|=$bit if $self->{$opt};
+      }
+      my $head=pack("l6x$headsize",
+	magic,@$self{'buckets','bucketsize','pagesize'},$flags,filevers
+      );
+      sysseek $self->{_fh},SEEK_SET,0
+	or croak "Can't seek to beginning: $!";
+      syswrite($self->{_fh},$head,$headsize)==$headsize
+	or croak "Can't write file header: $!";
+    }
+
+    # mmap() isn't supposed to work on locked files, so unlock
+    $self->_unlock;
+
+    mmap($self->{_mmap}='',$size,$self->{_fh})
+      or do{
+	delete $self->{_mmap};
+	croak "Can't mmap $self->{_filename}: $!";
+      };
+    length($self->{_mmap}) eq $size
+      or do{
+        delete $self->{_mmap};
+	croak "mmap() failed silently: $!";
+      };
+
+    1;
+  } or $err=1;
+
+  # Unlock file before returning
+  $self->_unlock;
+
+  # Propagate caught error if there was one
+  die $@ if $err;
+}
+
+=item DESTROY()
+
+Unmap and close the file.
+
+=cut
+
+sub DESTROY{
+  my($self)=@_;
+
+  munmap($self->{_mmap}) if exists $self->{_mmap};
+  close $self->{_fh};
+}
+
+=item _lock($offset)
+
+Lock the cache file. If $offset is zero, the file header is locked.
+Otherwise, the bucket starting at $offset is locked.
+
+XXX This also needs to create an internal lock if threading is enabled.
+
+=cut
+
+sub _lock{
+  my($self,$offset)=@_;
+  my $length=$offset ? $self->{bucketsize} : $headsize;
+
+  _lock_xs($self->{_fh},$offset,$length,1);
+}
+
+=item _unlock()
+
+Unlocks the entire cache file.
+
+XXX This needs to unlock internal lock and take an offset arg if threading
+
+=cut
+
+sub _unlock{
+  my($self)=@_;
+
+  _lock_xs($self->{_fh},0,0,0);
+}
+
+=item _insert($bucket,$ekey,$eval,$write)
+
+Inserts the key/value pair into the bucket. The item will be marked as dirty
+if $write is true, and writethrough() is false.
+
+=cut
+
 sub _insert{
   my($self,$bucket,$ekey,$eval,$write)=@_;
   my $klen=length $ekey;
@@ -657,55 +954,12 @@ sub _insert{
   substr($self->{_mmap},$bucket,$bheadsize+$filled)=$bhead.$content;
 }
 
-################################################################################
-# Method: delete($key)
-# Description: Delete the specified item from the cache
-# Returns: wantarray ? ($found,$val) : $val
-# Author: Peter Haworth
-sub delete{
-  my($self,$key)=@_;
-  my $bucket=$self->_bucket($key);
+=item _bucket($key)
 
-  # Lock the bucket
-  $self->_lock($bucket);
+Returns the offset of the bucket which would hold $key.
 
-  my($found,$val,$err);
-  eval{
-    local $SIG{__DIE__};
+=cut
 
-    ($found,my($expired,$poff,$off,$size,$klen,$vlen,$flags))
-      =$self->_find($bucket,$key);
-
-    if($found){
-      $val=$self->_decode(substr($self->{_mmap},$off+$eheadsize+$klen,$vlen),0);
-      if(my $dsub=$self->{delete} and !($flags & elem_dirty)){
-	$dsub->($key,$val,$self->{context});
-      }
-      my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
-      my $new_filled=$filled-$size;
-      substr($self->{_mmap},$bucket,$bheadsize)
-	=substr(pack("lx$bheadsize",$new_filled),0,$bheadsize);
-
-      my $fill_end=$bucket+$bheadsize+$filled;
-      my $elem_end=$off+$size;
-      substr($self->{_mmap},$off,$fill_end-$elem_end)
-        =substr($self->{_mmap},$elem_end,$fill_end-$elem_end);
-    }
-
-    1;
-  } or $err=1;
-  $self->_unlock;
-
-  # Propagate errors
-  die $@ if $err;
-
-  return ($found,$val);
-}
-
-################################################################################
-# Internal method: _bucket($key)
-# Description: Return the offset of the bucket which would hold $key
-# Author: Peter Haworth
 sub _bucket{
   my($self,$key)=@_;
 
@@ -719,10 +973,14 @@ sub _bucket{
   return $self->{pagesize}+$bucket*$self->{bucketsize};
 }
 
-################################################################################
-# Internal method: _find($bucket,$key)
-# Description: Locate the item keyed by $key in the bucket starting at $bucket
-# Returns: ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags)
+=item _find($bucket,$key)
+
+Locate the item keyed by $key in the bucket starting at $bucket.
+
+Returns: ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags)
+
+=cut
+
 sub _find{
   my($self,$bucket,$key)=@_;
   my($filled)=unpack 'l',substr($self->{_mmap},$bucket,$bheadsize);
@@ -766,10 +1024,12 @@ sub _find{
   return ($found,$expired,$poff,$off,$size,$klen,$vlen,$flags);
 }
 
-################################################################################
-# Internal method: _encode($value,$is_key)
-# Description: Encodes the given value into a string
-# Author: Peter Haworth
+=item _encode($value,$is_key)
+
+Encodes the given value into a string
+
+=cut
+
 sub _encode{
   my($self,$value,$is_key)=@_;
 
@@ -791,10 +1051,12 @@ sub _encode{
   }
 }
 
-################################################################################
-# Internal method: _decode($value,$is_key)
-# Description: Decodes the given string value
-# Author: Peter Haworth
+=item _decode($value,$is_key)
+
+Decodes the given string value
+
+=cut
+
 sub _decode{
   my($self,$value,$is_key)=@_;
 
@@ -820,264 +1082,20 @@ sub _decode{
 
 
 
-################################################################################
 # Return true to require
 1;
 
 
-__END__
-
-=head1 NAME
-
-Cache::Mmap - Shared data cache using memory mapped files
-
-=head1 SYNOPSIS
-
-  use Cache::Mmap;
-
-  $cache=Cache::Mmap->new($filename,\%options);
-
-  $val1=$cache->read($key1);
-  $cache->write($key2,$val2);
-  $cache->delete($key3);
-
-=head1 DESCRIPTION
-
-This module implements a shared data cache, using memory mapped files.
-If routines are provided which interact with the underlying data, access to
-the cache is completely transparent, and the module handles all the details of
-refreshing cache contents, and updating underlying data, if necessary.
-
-Cache entries are assigned to "buckets" within the cache file, depending on
-the key. Within each bucket, entries are stored approximately in order of last
-access, so that frequently accessed entries will move to the head of the
-bucket, thus decreasing access time. Concurrent accesses to the same bucket are
-prevented by file locking of the relevant section of the cache file.
-
-=head1 METHODS
-
-=over 4
-
-=item Cache::Mmap->new($filename,\%options)
-
-Creates a new cache object. If the file named by C<$filename> does not already
-exist, it will be created.  Various options may be set in C<%options>, which
-affect the behaviour of the cache (defaults in parentheses):
-
-=over 4
-
-=item permissions (0600)
-
-Sets the file permissions for the cache file if it doesn't already exist.
-
-=item buckets (13)
-
-Sets the number of buckets inside the cache file. A larger number of buckets
-will give better performance for a cache with many accesses, as there will be
-less chance of concurrent access to the same bucket.
-
-=item bucketsize (1024)
-
-Sets the size of each bucket, in bytes. A larger bucket size will be needed to
-store large cache entries. If the bucketsize is not large enough to hold a
-particular entry, it will still be passed between the underlying data and the
-application in its entirety, but will not be stored in the cache.
-
-=item pagesize (1024)
-
-Sets the alignment of buckets within the file. The file header will be extended
-to this size, and bucket sizes will be rounded up to the nearest multiple.
-Choosing a pagesize equal to the virtual memory page size of the host system
-should improve performance.
-
-=item strings (0)
-
-If true, cache entries are treated as strings, rather than references. This
-will help performance for string-only caches, as no time will be taken to
-serialize cache entries.
-
-=item expiry (0)
-
-If non-zero, sets the length of time, in seconds, which cache entries are
-considered valid. A new entry will be fetched from the underlying data if
-an expired cache entry would otherwise have been returned.
-
-=item context (undef)
-
-This value is passed to the read/write/delete routines below, to provide
-context. This will typically be a database handle, used to fetch data from.
-
-=item read (undef)
-
-Provides a code reference to a routine which will fetch entries from the
-underlying data. Called as C<$read-E<gt>($key,$context)>, this routine should
-return a list C<($found,$value)>, where C<$found> is true if the entry could
-be found in the underlying data, and C<$value> is the value to cache.
-
-If the routine only returns a single scalar, that will be taken as
-the value, and C<$found> will be set to true if the value is defined.
-
-If this routine is not provided, only values already in the cache will ever
-be returned.
-
-There are currently two special values of C<$found> which cause slightly
-different behaviour. These are constants which may be imported in the
-C<use> statement.
-
-=over 4
-
-=item C<Cache::Mmap::CMM_keep_expired>
-
-Use the previously cached value, even if it has expired. This is useful if
-the underlying data source has become unavailable for some reason. Note that
-even though the value returned will be ignored in this case, it must be
-returned to avoid C<$found> being interpreted as a single scalar:
-
-  return (Cache::Mmap::CMM_keep_expired, undef);
-
-=item C<Cache::Mmap::CMM_keep_expired_refresh>
-
-This causes the same behaviour as C<CMM_keep_expired>, but the cache entry's
-expiry time will be reset as if a value had been successfully read from the
-underlying data.
-
 =back
 
-=item cachenegative (0)
-
-If true, even unsuccessful fetches from the underlying data are cached. This
-can be useful to only search the underlying data once for each required key.
-
-=item write (undef)
-
-Provides a code reference to a routine which will write cache entries into the
-underlying data. This routine will be called after C<$cache-E<gt>write()> is
-called, to synchronise the underlying data with the cache. Called as
-C<$write-E<gt>($key,$val,$context)>. If the routine is not provided, the
-underlying data will not be synchronised after cache writes.
-
-=item writethrough (1)
-
-If true, the C<write> routine above will be called as soon as
-C<$cache-E<gt>write()> is called. This provides immediate synchronisation of
-underlying data and cache contents.
-
-If false, the C<write> routine will
-be called for each cache entry which no longer fits in its bucket after a
-cache read or write. This provides a write-as-necessary behaviour, which may
-be more efficient than the writethrough behaviour. However, only data fetched
-through the cache will reflect these changes.
-
-=item delete (undef)
-
-Provides a code reference to a routine which will delete items from the
-underlying data. This routine will be called after C<$cache->delete()> is
-called, to synchronise the underlying data with the cache. Called as
-C<$cache-E<gt>delete($key,$cval,$context)>, where C<$cval> is the value
-currently stored in the cache. If this routine is not provided, entries
-deleted from the cache have no effect on the underlying data.
-
-=back
-
-An alternative to supplying a C<write> routine, is to call
-C<$cache-E<gt>delete()> after updating the underlying data. Note however, that
-in the case of databases, this should be done after committing the update, so
-that a concurrent process doesn't reload the cache between being the entry
-being deleted, and the database updates being committed.
-
-=item $cache->buckets()
-
-Returns the number of buckets in the cache file. Note that this may be
-different to the number passed to C<new()>, since an existing cache file may
-have been created with different options.
-
-=item $cache->bucketsize()
-
-Returns the size of buckets in the cache file. May be different to C<new()>
-parameter.
-
-=item $cache->pagesize()
-
-Returns the page size of the cache file. May be different to C<new()> parameter.
-
-=item $cache->strings()
-
-Returns true if the cache stores strings rather than references. May be
-different to C<new()> parameter.
-
-=item $cache->expiry()
-
-Returns the time in seconds cache entries are considered valid for, or zero
-for indefinite validity. May be different to C<new()> parameter.
-
-=item $cache->writethrough()
-
-Returns true if items written to the cache are immediately written to the
-underlying data. May be different to C<new()> parameter.
-
-=item $cache->cachenegative()
-
-Returns true if items not found in the underlying data are cached anyway. May
-be different to C<new()> parameter.
-
-=item $cache->context()
-
-Returns the context data for reads and writes to the underlying data.
-
-=item $cache->context($context)
-
-Provides new context data for reads and writes to the underlying data.
-
-=item $cache->read($key)
-
-Reads an entry from the cache, or from the underlying data if not cached.
-Returns the value in scalar context, and C<($found,$value)> in list context,
-where C<$found> is true if the item was found in either the cache or the
-underlying data.
-
-=item $cache->write($key,$val)
-
-Writes an entry into the cache, and depending on C<new()> options, into the
-underlying data.
-
-=item $cache->delete($key)
-
-Deletes an entry from the cache, and depending on C<new()> options, from the
-underlying data.
-
-=item $cache->entries()
-
-=item $cache->entries(0)
-
-Returns a list of the keys of entries held in the cache. Note that this list
-may be immediately out of date, due to the shared nature of the cache. Entries
-may be added or removed by other processes between this list being generated
-and when it is used.
-
-=item $cache->entries(1)
-
-Returns a list of hashrefs representing entries held in the cache. The
-following keys are present in each hashref:
-
-  key    The key used to identify the entry
-  time   The time the entry was stored (seconds since the epoch)
-  dirty  Whether the entry needs writing to the underlying data
-
-The same caveat applies to the currency of this information as above.
-
-=item $cache->entries(2)
-
-As C<$cache-E<gt>entries(1)>, with the addition of a C<value> element in each
-hashref, holding the value stored in the cache entry.
-
-=item $cache->quick_clear()
-
-Forcefully delete the cache, with prejudice: unwritten dirty elements are B<not>
-written; they are thrown away.
-
-=back
+=end private
 
 =head1 AUTHOR
 
-Peter Haworth E<lt>pmh@edison.ioppublishing.comE<gt>
+Copyright (C) Institute of Physics Publishing 2002-2005
+
+	Peter Haworth <pmh@edison.ioppublishing.com>
+
+You may distribute under the terms of the GPL or the Artistic License,
+as distributed with Perl.
 

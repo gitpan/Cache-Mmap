@@ -4,23 +4,12 @@ underlying data, access to the cache is completely transparent, and the module
 handles all the details of refreshing cache contents, and updating underlying
 data, if necessary.
 
+Changes between versions 0.081 and 0.09
+  Behave correctly on systems which don't allow mmap()ing of locked files
+  Minor documentation improvements
+
 Changes between versions 0.08 and 0.081
   Make t/03corrupt.t work in UTF8 locales
-
-Changes between versions 0.07 and 0.08
-  Add CMM_keep_expired and CMM_keep_expired_refresh flags to enable temporary
-    underlying data availability problems to be dealt with nicely
-    Thanks to Jeffrey Friedl <jfriedl@yahoo.com>
-      for the idea and initial implementation
-  Document quick_clear()
-
-Changes between versions 0.05 and 0.07
-  Add a check for super-sized entries (those which extend past the bucket end)
-  Make zero-sized check message include cache filename and key
-  Add t/03corrupt.t to check that the corruption checks are working
-  Deal with utf8 properly (and add t/04utf8.t)
-    This changes the file format, so added format version number to file header
-  Existing files which aren't cache files are not overwritten
 
 
 INSTALLING
@@ -33,8 +22,8 @@ How to install
 	make install
 
 
-$Id: README,v 1.8 2004/03/15 16:42:29 pmh Exp $
+$Id: README,v 1.9 2005/11/15 18:34:47 pmh Exp $
 
-Copyright Institute of Physics Publishing 2002
+Copyright (C) Institute of Physics Publishing 2002-2005
 You may distribute under the terms of the GPL or the Artistic License,
 as distributed with Perl.

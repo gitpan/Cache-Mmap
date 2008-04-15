@@ -1,4 +1,12 @@
-$Id: Changes,v 1.9 2005/11/15 18:35:19 pmh Exp $
+$Id: Changes,v 1.10 2008/04/15 09:46:23 pmh Exp $
+
+2008-04-15 0.11
+  Doc fix:
+    Add 0.10's changes to this list :-)
+
+2008-04-15 0.11
+  Bug fix:
+    Fix the perl version check to something which doesn't complain with 5.10
 
 2005-11-15 0.09
   Bug fix:

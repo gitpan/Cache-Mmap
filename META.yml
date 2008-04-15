@@ -1,17 +1,14 @@
---- #YAML:1.0
-name:                Cache-Mmap
-version:             0.10
-abstract:            Shared cache using mmap'd file
-license:             ~
-author:              
-    - Peter Haworth (pmh@edison.ioppublishing.com)
-generated_by:        ExtUtils::MakeMaker version 6.42
-distribution_type:   module
-requires:     
+# http://module-build.sourceforge.net/META-spec.html
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         Cache-Mmap
+version:      0.11
+version_from: Mmap.pm
+installdirs:  site
+requires:
     Carp:                          0
     Fcntl:                         0
     Storable:                      0
     Test::More:                    0
-meta-spec:
-    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
-    version: 1.3
+
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version 6.30

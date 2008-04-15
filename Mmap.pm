@@ -1,4 +1,4 @@
-# $Id: Mmap.pm,v 1.13 2005/11/15 18:33:29 pmh Exp $
+# $Id: Mmap.pm,v 1.15 2008/04/15 09:41:26 pmh Exp $
 
 =head1 NAME
 
@@ -48,7 +48,7 @@ use vars qw(
   @EXPORT_OK
 );
 
-$VERSION='0.10';
+$VERSION='0.11';
 @ISA=qw(DynaLoader Exporter);
 @EXPORT_OK=qw(CMM_keep_expired CMM_keep_expired_refresh);
 
@@ -1092,7 +1092,7 @@ sub _decode{
 
 =head1 AUTHOR
 
-Copyright (C) Institute of Physics Publishing 2002-2005
+Copyright (C) Institute of Physics Publishing 2002-2008
 
 	Peter Haworth <pmh@edison.ioppublishing.com>
 

@@ -32,7 +32,7 @@ prevented by file locking of the relevant section of the cache file.
 package Cache::Mmap;
 
 # Do we need to worry about UTF-8?
-use constant has_utf8 => defined($^V) && $^V ge "\5\6\0";
+use constant has_utf8 => has_utf8 => $] >= 5.006_000;
 
 use Carp qw(croak);
 use DynaLoader();
@@ -48,7 +48,7 @@ use vars qw(
   @EXPORT_OK
 );
 
-$VERSION='0.09';
+$VERSION='0.10';
 @ISA=qw(DynaLoader Exporter);
 @EXPORT_OK=qw(CMM_keep_expired CMM_keep_expired_refresh);
 
